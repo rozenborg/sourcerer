@@ -10,7 +10,10 @@ import sys
 from datetime import datetime, timezone
 
 import yaml
+from dotenv import load_dotenv
 from supabase import create_client, Client
+
+load_dotenv()
 
 from fetchers import fetch_rss, fetch_sitemap, fetch_podcast
 
