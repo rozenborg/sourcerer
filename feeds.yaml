@@ -1,0 +1,92 @@
+sources:
+  # --- RSS / Substack (full content usually available in feed) ---
+  - id: mollick-one-useful-thing
+    name: "One Useful Thing (Ethan Mollick)"
+    type: rss
+    feed_url: https://www.oneusefulthing.org/feed
+
+  - id: openai-blog
+    name: "OpenAI Blog"
+    type: rss
+    feed_url: https://openai.com/news/rss.xml
+
+  - id: ken-huang-ai-expert
+    name: "Ken Huang | AI Expert"
+    type: rss
+    feed_url: https://substack-proxy.rozenborg.workers.dev/?url=https://kenhuangus.substack.com/feed
+
+  - id: khemaridh-future-proof
+    name: "Future-Proof Your Career"
+    type: rss
+    feed_url: https://substack-proxy.rozenborg.workers.dev/?url=https://khemaridh.substack.com/feed
+
+  - id: ai-collective
+    name: "The AI Collective"
+    type: rss
+    feed_url: https://substack-proxy.rozenborg.workers.dev/?url=https://aicollective.substack.com/feed
+
+  - id: hbr
+    name: "Harvard Business Review"
+    type: rss
+    feed_url: http://feeds.hbr.org/harvardbusiness
+    keywords: [AI, Artificial Intelligence, GenAI, Generative AI, ChatGPT, LLM, Machine Learning, Automation, Agentic]
+
+  - id: real-estate-news
+    name: "Real Estate News"
+    type: rss
+    feed_url: https://www.realestatenews.com/rss
+    keywords: [AI, Artificial Intelligence, ChatGPT, LLM, Machine Learning, Automation]
+
+  # --- Sitemaps ---
+  - id: anthropic-blog
+    name: "Anthropic Blog"
+    type: sitemap
+    url: https://www.anthropic.com/sitemap.xml
+    url_pattern: "/news/"
+
+  - id: builtin-com
+    name: "Built In"
+    type: sitemap
+    url: https://builtin.com/sitemap.xml
+    url_pattern: "/articles/"
+    keywords: [AI, Artificial Intelligence, ChatGPT, LLM, Machine Learning, Automation]
+
+  - id: ey-com
+    name: "EY Insights"
+    type: sitemap
+    url: https://www.ey.com/en_nl/sitemap/insights.xml
+    url_pattern: "/insights/ai/"
+    keywords: [AI, Artificial Intelligence, Agentic, GenAI, Generative AI, LLM]
+
+  # --- Podcasts ---
+  - id: a16z-podcast
+    name: "The a16z Show"
+    type: podcast
+    feed_url: https://feeds.simplecast.com/JGE3yC0V
+
+  - id: dwarkesh-podcast
+    name: "Dwarkesh Podcast"
+    type: podcast
+    feed_url: https://apple.dwarkesh-podcast.workers.dev/feed.rss
+    notes: "Long episodes (2-3 hrs)"
+
+  - id: no-priors
+    name: "No Priors"
+    type: podcast
+    feed_url: https://feeds.megaphone.fm/nopriors
+
+  - id: latent-space
+    name: "Latent Space"
+    type: podcast
+    feed_url: https://substack-proxy.rozenborg.workers.dev/?url=https://api.substack.com/feed/podcast/1084089.rss
+
+  - id: ai-daily-brief
+    name: "AI Daily Brief"
+    type: podcast
+    feed_url: https://feeds.podcastai.com/lzSp5oGSGEaLNzHdqUBaTh.xml
+    notes: "Short daily episodes (~10 min)"
+
+settings:
+  lookback_days: 3
+  max_posts_per_source: 5
+  summarization_model: claude-sonnet-4-20250514
