@@ -95,22 +95,18 @@ def _extract_audio_url(entry) -> Optional[str]:
     return None
 
 
-YOUTUBE_PLAYER_CLIENT = ["android"]
-
-
 def _yt_dlp_opts() -> dict:
     """Common yt-dlp options. Adds cookiefile when YOUTUBE_COOKIES_FILE
     is set — required from datacenter IPs (GitHub Actions) where YouTube's
     player API rejects unauthenticated requests."""
     cookiefile = os.environ.get("YOUTUBE_COOKIES_FILE")
-    opts = {
-        "quiet": True,
-        "skip_download": True,
-        "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENT}},
-    }
+    opts = {"quiet": True, "skip_download": True, "no_warnings": True}
     if cookiefile and os.path.exists(cookiefile) and os.path.getsize(cookiefile) > 0:
         opts["cookiefile"] = cookiefile
+    else:
+        # Without cookies (local dev), the android client exposes captions
+        # where the default web client returns empty dicts.
+        opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
     return opts
 
 
