@@ -98,6 +98,22 @@ def _extract_audio_url(entry) -> Optional[str]:
 YOUTUBE_PLAYER_CLIENT = ["android"]
 
 
+def _yt_dlp_opts() -> dict:
+    """Common yt-dlp options. Adds cookiefile when YOUTUBE_COOKIES_FILE
+    is set — required from datacenter IPs (GitHub Actions) where YouTube's
+    player API rejects unauthenticated requests."""
+    cookiefile = os.environ.get("YOUTUBE_COOKIES_FILE")
+    opts = {
+        "quiet": True,
+        "skip_download": True,
+        "no_warnings": True,
+        "extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENT}},
+    }
+    if cookiefile and os.path.exists(cookiefile) and os.path.getsize(cookiefile) > 0:
+        opts["cookiefile"] = cookiefile
+    return opts
+
+
 def _fetch_youtube_transcript(video_id: str) -> Optional[str]:
     """Fetch captions for a YouTube video.
 
@@ -112,14 +128,8 @@ def _fetch_youtube_transcript(video_id: str) -> Optional[str]:
         print("    yt-dlp not installed, skipping captions")
         return None
 
-    opts = {
-        "skip_download": True,
-        "quiet": True,
-        "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENT}},
-    }
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with yt_dlp.YoutubeDL(_yt_dlp_opts()) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     except Exception as e:
         print(f"    Caption metadata error: {e}")
@@ -577,14 +587,7 @@ def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     max_posts = settings.get("max_posts_per_source", 5)
     model = settings.get("summarization_model", "claude-sonnet-4-20250514")
 
-    ydl_opts = {
-        "extract_flat": "in_playlist",
-        "playlistend": max_posts * 3,
-        "quiet": True,
-        "skip_download": True,
-        "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENT}},
-    }
+    ydl_opts = {**_yt_dlp_opts(), "extract_flat": "in_playlist", "playlistend": max_posts * 3}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

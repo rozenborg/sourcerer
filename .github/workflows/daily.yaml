@@ -24,6 +24,15 @@ jobs:
       - name: Install Python deps
         run: pip install -r requirements.txt
 
+      - name: Write YouTube cookies (if secret set)
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES" ]; then
+            printf '%s' "$YOUTUBE_COOKIES" > /tmp/youtube_cookies.txt
+            echo "YOUTUBE_COOKIES_FILE=/tmp/youtube_cookies.txt" >> $GITHUB_ENV
+          fi
+
       - name: Run pull
         env:
           ANTHROPIC_API_KEY:     ${{ secrets.ANTHROPIC_API_KEY }}
