@@ -17,7 +17,7 @@ Headless content database. GitHub Actions cron fetches sources in `feeds.yaml`, 
 
 Plain functions, no classes, no framework. Fetchers (`fetch_rss`, `fetch_sitemap`, `fetch_podcast`, `fetch_youtube`) dispatched via the `FETCHERS` dict in `pull.py`. The simplicity is intentional — don't refactor toward abstractions. New fetchers should follow the same shape: `fetch_X(source, seen_urls, settings) -> list[article_dict]`.
 
-The `youtube` fetcher uses yt-dlp to list channel videos (YouTube blocks the public `videos.xml` feed from datacenter IPs) and `youtube-transcript-api` v1.x to pull captions. Videos without captions are skipped — Whisper fallback is on the wishlist. Lookback filtering doesn't apply to YouTube (flat extraction lacks per-video timestamps); `max_posts_per_source` and seen-URL dedup are the limiters.
+The `youtube` fetcher uses yt-dlp for everything — listing channel videos AND discovering caption track URLs. The `android` player_client is pinned because the `web` client returns empty subtitle dicts in CI, and `youtube-transcript-api` is IP-blocked from datacenter ranges (verified failing on GitHub Actions). Captions come back as json3 fetched directly via httpx. Videos without captions are skipped — Whisper fallback is on the wishlist. Lookback filtering doesn't apply to YouTube (flat extraction lacks per-video timestamps); `max_posts_per_source` and seen-URL dedup are the limiters.
 
 ## Wishlist
 

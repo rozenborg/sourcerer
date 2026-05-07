@@ -95,21 +95,64 @@ def _extract_audio_url(entry) -> Optional[str]:
     return None
 
 
+YOUTUBE_PLAYER_CLIENT = ["android"]
+
+
 def _fetch_youtube_transcript(video_id: str) -> Optional[str]:
-    """Fetch captions (manual or auto-generated) for a YouTube video.
-    Free and instant — preferred over downloading audio + Whisper."""
+    """Fetch captions for a YouTube video.
+
+    Uses yt-dlp's `android` player_client to discover the caption track URL,
+    then fetches the json3 file directly. Other approaches we tried:
+    - youtube-transcript-api: IP-blocked from datacenter ranges (incl. GitHub Actions)
+    - yt-dlp `web` client: returns empty subtitle dicts in CI
+    The android client consistently exposes captions where the others don't."""
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
+        import yt_dlp
     except ImportError:
-        print("    youtube-transcript-api not installed, skipping captions")
+        print("    yt-dlp not installed, skipping captions")
         return None
+
+    opts = {
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENT}},
+    }
     try:
-        api = YouTubeTranscriptApi()
-        fetched = api.fetch(video_id)
-        return " ".join(seg.text for seg in fetched).strip() or None
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+    except Exception as e:
+        print(f"    Caption metadata error: {e}")
+        return None
+
+    # Prefer manual subs over auto; prefer json3 over other formats
+    subs = info.get("subtitles") or {}
+    auto = info.get("automatic_captions") or {}
+    tracks = subs.get("en") or auto.get("en") or subs.get("en-US") or auto.get("en-US") or []
+    if not tracks:
+        return None
+    target = next((t for t in tracks if t.get("ext") == "json3"), tracks[0])
+    track_url = target.get("url")
+    if not track_url:
+        return None
+
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT, headers=HEADERS, follow_redirects=True) as c:
+            r = c.get(track_url)
+            r.raise_for_status()
+            data = r.json()
     except Exception as e:
         print(f"    Caption fetch error: {e}")
         return None
+
+    text = " ".join(
+        seg["utf8"]
+        for ev in data.get("events", [])
+        for seg in (ev.get("segs") or [])
+        if seg.get("utf8")
+    )
+    text = " ".join(text.split())
+    return text or None
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +583,7 @@ def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
         "quiet": True,
         "skip_download": True,
         "no_warnings": True,
+        "extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENT}},
     }
 
     try:

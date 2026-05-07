@@ -9,5 +9,4 @@ pydub
 pyyaml
 supabase
 python-dotenv
-youtube-transcript-api>=1.0
 yt-dlp
