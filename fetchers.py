@@ -95,14 +95,6 @@ def _extract_audio_url(entry) -> Optional[str]:
     return None
 
 
-def _extract_youtube_video_id(entry, url: str) -> Optional[str]:
-    """Pull the 11-char YouTube video ID from a feed entry or watch URL."""
-    if vid := entry.get("yt_videoid"):
-        return vid
-    match = re.search(r"(?:v=|/shorts/|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
-    return match.group(1) if match else None
-
-
 def _fetch_youtube_transcript(video_id: str) -> Optional[str]:
     """Fetch captions (manual or auto-generated) for a YouTube video.
     Free and instant — preferred over downloading audio + Whisper."""
@@ -513,44 +505,65 @@ def _parse_sitemap_xml(url: str, pattern: Optional[str] = None) -> list[dict]:
 
 def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     """
-    Fetch videos from a YouTube channel via the channel's videos.xml feed.
-    Prefers captions (free, instant) over audio download + Whisper.
-    Videos without available captions are skipped.
+    Fetch videos from a YouTube channel.
+    Lists videos via yt-dlp (YouTube's videos.xml feed is blocked from
+    most datacenter IPs), then pulls captions via youtube-transcript-api.
+    Videos without captions are skipped.
+
+    Note: lookback_days isn't applied here — flat extraction doesn't give
+    per-video timestamps cheaply, and max_posts + seen_urls dedup is
+    enough in practice (listings come back newest-first).
     """
-    feed_url = source.get("feed_url")
-    if not feed_url:
-        raise ValueError(f"No feed_url for youtube source {source['id']}")
+    channel_url = source.get("channel_url") or source.get("feed_url")
+    if not channel_url:
+        raise ValueError(f"No channel_url for youtube source {source['id']}")
 
-    feed = _fetch_feed(feed_url)
-    if feed.bozo and not feed.entries:
-        raise ValueError(f"Feed parse error: {feed.bozo_exception}")
+    # Normalize: accept old videos.xml URLs and bare channel URLs alike
+    if "/feeds/videos.xml" in channel_url:
+        m = re.search(r"channel_id=(UC[\w-]+)", channel_url)
+        if m:
+            channel_url = f"https://www.youtube.com/channel/{m.group(1)}"
+    if not channel_url.rstrip("/").endswith(("/videos", "/streams")):
+        channel_url = channel_url.rstrip("/") + "/videos"
 
-    lookback = datetime.now(timezone.utc) - timedelta(days=settings.get("lookback_days", 3))
+    try:
+        import yt_dlp
+    except ImportError:
+        raise RuntimeError("yt-dlp not installed (pip install yt-dlp)")
+
     max_posts = settings.get("max_posts_per_source", 5)
     model = settings.get("summarization_model", "claude-sonnet-4-20250514")
 
-    entries = []
-    for entry in feed.entries:
-        dt = _parse_feed_date(entry)
-        entries.append((dt, entry))
-    entries.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    ydl_opts = {
+        "extract_flat": "in_playlist",
+        "playlistend": max_posts * 3,
+        "quiet": True,
+        "skip_download": True,
+        "no_warnings": True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(channel_url, download=False)
+    except Exception as e:
+        raise RuntimeError(f"yt-dlp listing failed: {e}")
+
+    entries = info.get("entries") or []
 
     articles = []
-    for dt, entry in entries:
+    for entry in entries:
         if len(articles) >= max_posts:
             break
-        if dt and dt < lookback:
-            continue
 
-        url = _extract_link(entry)
-        if not url or url in seen_urls:
-            continue
-
-        video_id = _extract_youtube_video_id(entry, url)
+        video_id = entry.get("id")
         if not video_id:
             continue
 
-        title = entry.get("title", "Untitled").strip()
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        if url in seen_urls:
+            continue
+
+        title = (entry.get("title") or "Untitled").strip()
         print(f"  [{source['id']}] {title[:60]}")
 
         transcript = _fetch_youtube_transcript(video_id)
@@ -563,7 +576,7 @@ def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
         articles.append({
             "title": title,
             "url": url,
-            "date": dt,
+            "date": None,
             "source_id": source["id"],
             "source_name": source["name"],
             "source_type": "youtube",

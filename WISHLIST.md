@@ -7,8 +7,8 @@ Ideas for Sourcerer, kept loose. Check off when implemented.
 The dream: paste a name or URL, get a working entry in `feeds.yaml`. Build in layers:
 
 **Layer 1: New source types** (concrete, scoped)
-- [x] `youtube` fetcher — videos.xml feed + captions via youtube-transcript-api (skip if no captions)
-- [ ] `yt-dlp + Whisper` fallback for YouTube videos with captions disabled
+- [x] `youtube` fetcher — yt-dlp listing + captions via youtube-transcript-api (skip if no captions). YouTube blocks videos.xml from datacenter IPs, so yt-dlp is the listing path.
+- [ ] Whisper fallback for YouTube videos with captions disabled (yt-dlp can already grab the audio)
 - [ ] Podcast transcript routing — many podcasts publish transcripts in shownotes; check before downloading audio
 
 **Layer 2: URL-based add flow** (`add_source.py`)

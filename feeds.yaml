@@ -87,11 +87,11 @@ sources:
     notes: "Short daily episodes (~10 min)"
 
   # --- YouTube channels (uses captions; videos without captions are skipped) ---
-  # Find channel ID by viewing source on the channel page and searching for "externalId"
+  # channel_url accepts any YouTube channel URL form (handle, /channel/UC..., /@name)
   - id: sequoia-capital
     name: "Sequoia Capital"
     type: youtube
-    feed_url: https://www.youtube.com/feeds/videos.xml?channel_id=UCWrF0oN6unbXrWsTN7RctTw
+    channel_url: https://www.youtube.com/@SequoiaCapital
 
 settings:
   lookback_days: 3
