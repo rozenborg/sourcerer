@@ -12,16 +12,16 @@ The dream: paste a name or URL, get a working entry in `feeds.yaml`. Build in la
 - [ ] Podcast transcript routing — many podcasts publish transcripts in shownotes; check before downloading audio
 
 **Layer 2: URL-based add flow** (`add_source.py`)
-- [ ] Probe a URL and auto-detect type
-  - [ ] RSS auto-discovery via `<link rel="alternate" type="application/rss+xml">`
-  - [ ] Common-path fallbacks: `/feed`, `/rss`, `/atom`, `/feed.xml`
-  - [ ] Detect podcast vs article feed via `<enclosure type="audio/...">`
-  - [ ] Detect YouTube channel/handle URLs → construct videos.xml URL
-  - [ ] Auto-wrap Substack/Cloudflare-blocked feeds with `substack-proxy.workers.dev`
-  - [ ] Apple Podcasts URL → resolve via iTunes Search API
+- [x] Probe a URL and auto-detect type
+  - [x] RSS auto-discovery via `<link rel="alternate" type="application/rss+xml">`
+  - [x] Common-path fallbacks: `/feed`, `/rss`, `/atom`, `/feed.xml`
+  - [x] Detect podcast vs article feed via `<enclosure type="audio/...">`
+  - [x] Detect YouTube channel/handle URLs → wire as `youtube` type with `channel_url`
+  - [x] Auto-wrap Substack hosts with `substack-proxy.workers.dev` (always, since CI is CF-blocked)
+  - [x] Apple Podcasts URL → resolve via iTunes Search API
   - [ ] Sitemap fallback: pull from `robots.txt`, ask Claude to suggest a `url_pattern` from a URL sample
-- [ ] Dry-run: fetch one article, show the summary, confirm before appending to `feeds.yaml`
-- [ ] Decide whether a feed needs a `keywords` filter (default off; prompt if it looks general-interest)
+- [x] Lightweight preview before appending — shows latest entry title + count without burning Claude/Whisper budget
+- [ ] Auto-decide whether a feed needs a `keywords` filter (default off; prompt if it looks general-interest)
 
 **Layer 3: Name-based discovery** (wraps Layer 2)
 - [ ] Resolve "the sequoia capital youtube channel" → candidate feeds across YouTube/iTunes/web
@@ -44,3 +44,4 @@ The dream: find new high-signal sources automatically, not mediocre ones.
 ## Done
 
 - 2026-05-06 — `youtube` fetcher with caption-preferred routing
+- 2026-05-06 — `add_source.py` URL-based add flow (RSS, Apple Podcasts, YouTube, Substack, HTML-with-feed)
