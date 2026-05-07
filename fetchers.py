@@ -715,10 +715,31 @@ def _s2_headers() -> dict:
     return {"x-api-key": api_key} if api_key else {}
 
 
+def _s2_get(path: str, params: dict | None = None, retries: int = 3) -> Optional[dict]:
+    """GET against S2 with backoff on 429s. Returns JSON dict on 200, else None."""
+    delay = 1.0
+    for attempt in range(retries):
+        try:
+            with httpx.Client(timeout=HTTP_TIMEOUT, headers=_s2_headers()) as c:
+                r = c.get(f"{S2_BASE}{path}", params=params)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code == 429 and attempt < retries - 1:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            return None
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            return None
+    return None
+
+
 def _resolve_seed(ref: str) -> Optional[str]:
     """Resolve any seed reference (DOI, arXiv ID, URL, or title) to an S2 paperId."""
-    headers = _s2_headers()
-
     # Normalize URL forms to canonical IDs
     if m := re.match(r"https?://arxiv\.org/abs/([\w.\-]+)", ref):
         ref = f"ARXIV:{m.group(1)}"
@@ -729,32 +750,17 @@ def _resolve_seed(ref: str) -> Optional[str]:
 
     # Canonical ID — direct lookup
     if re.match(r"^(DOI|ARXIV|S2|PMID|MAG|ACL|CorpusId):", ref, re.IGNORECASE):
-        try:
-            with httpx.Client(timeout=HTTP_TIMEOUT, headers=headers) as c:
-                r = c.get(f"{S2_BASE}/graph/v1/paper/{ref}", params={"fields": "paperId"})
-                if r.status_code == 200:
-                    return r.json().get("paperId")
-                print(f"    [{ref}] lookup returned {r.status_code}")
-        except Exception as e:
-            print(f"    [{ref}] lookup error: {e}")
+        data = _s2_get(f"/graph/v1/paper/{ref}", {"fields": "paperId"})
+        if data:
+            return data.get("paperId")
+        print(f"    [{ref}] direct lookup failed")
         return None
 
-    # Otherwise treat as a title — search-by-match
-    try:
-        time.sleep(0.5)  # rate-limit cushion when no API key
-        with httpx.Client(timeout=HTTP_TIMEOUT, headers=headers) as c:
-            r = c.get(
-                f"{S2_BASE}/graph/v1/paper/search/match",
-                params={"query": ref[:300], "fields": "paperId,title"},
-            )
-            if r.status_code == 200:
-                data = r.json().get("data") or []
-                if data:
-                    return data[0].get("paperId")
-            else:
-                print(f"    title search '{ref[:50]}...' returned {r.status_code}")
-    except Exception as e:
-        print(f"    title search error: {e}")
+    # Title — use fuzzy /paper/search (more forgiving than /search/match)
+    data = _s2_get("/graph/v1/paper/search", {"query": ref[:300], "limit": 3, "fields": "paperId,title"})
+    if data and (results := data.get("data") or []):
+        return results[0].get("paperId")
+    print(f"    title search '{ref[:60]}...' returned no results")
     return None
 
 
