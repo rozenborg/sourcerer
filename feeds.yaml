@@ -98,7 +98,35 @@ sources:
     type: youtube
     channel_url: https://www.youtube.com/@LennysPodcast
 
+  # --- Scholarly papers (Mollick-style filter via Semantic Scholar recommender) ---
+  - id: scholarly-mollick-style
+    name: "Scholarly (Mollick-style)"
+    type: scholarly
+    score_threshold: 14
+    max_candidates: 100
+    max_posts: 10
+    lookback_days: 90
+    seed_papers:
+      # Mollick-publicly-surfaced papers (§8.1 of the reference doc)
+      - "ARXIV:2302.06590"                # Peng et al. — GitHub Copilot productivity
+      - "DOI:10.1126/science.adh2586"     # Noy & Zhang — ChatGPT writing productivity
+      - "ARXIV:2303.01157"                # Felten, Raj, Seamans — occupation exposure
+      - "Navigating the Jagged Technological Frontier"        # Dell'Acqua et al., BCG
+      - "Falling Asleep at the Wheel Human AI HR Recruiters"  # Dell'Acqua, HR
+      - "The Cybernetic Teammate Generative AI Teamwork"      # Dell'Acqua et al., P&G
+      - "Generative AI at Work Brynjolfsson"                  # Brynjolfsson, Li, Raymond
+      - "AI Assistance in Legal Analysis Empirical"           # Choi & Schwarcz
+      - "DOI:10.1126/sciadv.adn5290"      # Doshi & Hauser — creativity & homogenization
+      - "Large Language Model Influence Diagnostic Reasoning Randomized Clinical Trial"  # Goh et al.
+      - "From Chalkboards to Chatbots Generative AI Nigeria"  # De Simone et al.
+      - "ARXIV:2506.08872"                # Kosmyna et al. — cognitive debt
+      # Mollick-aligned extensions (§8.2)
+      - "Effects of Generative AI High-Skilled Work Three Field Experiments Software Developers"  # Cui et al.
+      - "AI-Powered Lawyering Reasoning Models Retrieval Augmented Generation"  # Schwarcz et al.
+      - "Intelligent financial system how AI is transforming finance"  # BIS Aldasoro et al.
+
 settings:
   lookback_days: 3
   max_posts_per_source: 5
   summarization_model: claude-sonnet-4-20250514
+  scoring_model: claude-haiku-4-5-20251001

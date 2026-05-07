@@ -5,6 +5,8 @@ Plain functions — no classes, no framework.
 
 import os
 import re
+import json
+import time
 import tempfile
 import glob as globmod
 from datetime import datetime, timezone, timedelta
@@ -336,6 +338,8 @@ def summarize(text: str, source_type: str = "rss", title: str = "",
         type_hint = "This is a company blog post. Focus on product announcements, technical capabilities, and strategic implications.\n\n"
     elif source_type == "youtube":
         type_hint = "This is a YouTube video transcript from auto-generated or manual captions. Focus on the speakers' main arguments and insights. Captions can have transcription errors and miss visual context — work from the textual content you have.\n\n"
+    elif source_type == "scholarly":
+        type_hint = "This is a scholarly paper abstract. Lead with the empirical finding and what it implies for practice — not the methodology. Focus on what the paper reveals about how AI changes work, decisions, controls, or outcomes for organizations and professionals.\n\n"
 
     # Keep prompt in sync with workers/summarize-api/worker.js
     prompt = (
@@ -692,6 +696,240 @@ def fetch_podcast(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             "source_id": source["id"],
             "source_name": source["name"],
             "source_type": "podcast",
+            "summary": summary,
+        })
+
+    return articles
+
+
+# ---------------------------------------------------------------------------
+# Scholarly papers — Semantic Scholar recommender + Claude-scored Mollick filter
+# ---------------------------------------------------------------------------
+
+S2_BASE = "https://api.semanticscholar.org"
+S2_FIELDS = "title,abstract,year,publicationDate,authors,url,externalIds"
+
+
+def _s2_headers() -> dict:
+    api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+    return {"x-api-key": api_key} if api_key else {}
+
+
+def _resolve_seed(ref: str) -> Optional[str]:
+    """Resolve any seed reference (DOI, arXiv ID, URL, or title) to an S2 paperId."""
+    headers = _s2_headers()
+
+    # Normalize URL forms to canonical IDs
+    if m := re.match(r"https?://arxiv\.org/abs/([\w.\-]+)", ref):
+        ref = f"ARXIV:{m.group(1)}"
+    elif m := re.match(r"https?://(?:dx\.)?doi\.org/(.+)", ref):
+        ref = f"DOI:{m.group(1)}"
+    elif re.match(r"^10\.\d+/", ref):
+        ref = f"DOI:{ref}"
+
+    # Canonical ID — direct lookup
+    if re.match(r"^(DOI|ARXIV|S2|PMID|MAG|ACL|CorpusId):", ref, re.IGNORECASE):
+        try:
+            with httpx.Client(timeout=HTTP_TIMEOUT, headers=headers) as c:
+                r = c.get(f"{S2_BASE}/graph/v1/paper/{ref}", params={"fields": "paperId"})
+                if r.status_code == 200:
+                    return r.json().get("paperId")
+                print(f"    [{ref}] lookup returned {r.status_code}")
+        except Exception as e:
+            print(f"    [{ref}] lookup error: {e}")
+        return None
+
+    # Otherwise treat as a title — search-by-match
+    try:
+        time.sleep(0.5)  # rate-limit cushion when no API key
+        with httpx.Client(timeout=HTTP_TIMEOUT, headers=headers) as c:
+            r = c.get(
+                f"{S2_BASE}/graph/v1/paper/search/match",
+                params={"query": ref[:300], "fields": "paperId,title"},
+            )
+            if r.status_code == 200:
+                data = r.json().get("data") or []
+                if data:
+                    return data[0].get("paperId")
+            else:
+                print(f"    title search '{ref[:50]}...' returned {r.status_code}")
+    except Exception as e:
+        print(f"    title search error: {e}")
+    return None
+
+
+def _s2_recommendations(seed_paper_ids: list, limit: int = 100) -> list:
+    """POST to the multi-seed recommender. Returns list of candidate paper dicts."""
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT, headers=_s2_headers()) as c:
+            r = c.post(
+                f"{S2_BASE}/recommendations/v1/papers",
+                json={"positivePaperIds": seed_paper_ids},
+                params={"fields": S2_FIELDS, "limit": limit},
+            )
+            r.raise_for_status()
+            return r.json().get("recommendedPapers") or []
+    except Exception as e:
+        print(f"    Recommendation API error: {e}")
+        return []
+
+
+MOLLICK_RUBRIC_PROMPT = """\
+Score this academic paper against the Mollick-style high-signal research filter. The filter prefers papers that change what a smart organization should do next.
+
+Score 0-20 across these dimensions:
+- Realistic work task (0-3): Does it study real or realistic professional work?
+- Human/AI comparison (0-3): Compares human, AI, and/or human+AI with meaningful baselines?
+- Evidence design (0-3): RCT, field experiment, preregistered study, strong causal/quasi-causal design?
+- Boundary/failure insight (0-3): Identifies where AI helps vs. hurts, overreliance, hallucination, calibration failure?
+- Heterogeneity (0-2): Differences by skill, role, expertise, task type, team structure?
+- Managerial implication (0-3): Could the result change workflow, training, controls, or organizational design?
+- Memorable operating principle (0-2): Compressible into an executive concept?
+- Timeliness (0-1): Models/tools or concepts still relevant?
+
+Respond with ONLY valid JSON, no preamble:
+{{"score": <integer 0-20>, "reason": "<one-sentence rationale>"}}
+
+Title: {title}
+
+Abstract:
+{abstract}
+"""
+
+
+def _score_mollick_likeness(title: str, abstract: str, model: str) -> tuple[int, str]:
+    """Single Claude call. Returns (score, reason). Score 0 means scoring failed."""
+    if not abstract:
+        return 0, "no abstract"
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return 0, "anthropic package not installed"
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return 0, "ANTHROPIC_API_KEY not set"
+
+    prompt = MOLLICK_RUBRIC_PROMPT.format(title=title[:300], abstract=abstract[:5000])
+
+    try:
+        client = Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model=model,
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+    except Exception as e:
+        return 0, f"scoring API error: {e}"
+
+    # Strip markdown fences if present
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+        return int(data.get("score", 0)), str(data.get("reason", "no reason"))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        # Regex fallback for non-strict-JSON responses
+        score_m = re.search(r'"score"\s*:\s*(\d+)', text)
+        reason_m = re.search(r'"reason"\s*:\s*"([^"]*)"', text)
+        if score_m:
+            return int(score_m.group(1)), (reason_m.group(1) if reason_m else "")
+    return 0, "could not parse score"
+
+
+def _candidate_url(candidate: dict) -> Optional[str]:
+    """Prefer canonical external URLs (DOI, arXiv) over the S2 paper page."""
+    ext = candidate.get("externalIds") or {}
+    if doi := ext.get("DOI"):
+        return f"https://doi.org/{doi}"
+    if arxiv_id := ext.get("ArXiv"):
+        return f"https://arxiv.org/abs/{arxiv_id}"
+    return candidate.get("url")
+
+
+def _candidate_date(candidate: dict) -> Optional[datetime]:
+    if pub := candidate.get("publicationDate"):
+        try:
+            return datetime.fromisoformat(pub).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    if year := candidate.get("year"):
+        try:
+            return datetime(int(year), 1, 1, tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def fetch_scholarly(source: dict, seen_urls: set, settings: dict) -> list[dict]:
+    """
+    Fetch scholarly papers via Semantic Scholar's recommendation API,
+    seeded with curated 'taste' papers, filtered by a Claude-scored
+    Mollick-likeness rubric.
+    """
+    seed_refs = source.get("seed_papers") or []
+    if not seed_refs:
+        raise ValueError(f"No seed_papers for scholarly source {source['id']}")
+
+    score_threshold  = source.get("score_threshold", 14)
+    max_candidates   = source.get("max_candidates", 100)
+    lookback_days    = source.get("lookback_days", 90)
+    scoring_model    = source.get("scoring_model") or settings.get("scoring_model", "claude-haiku-4-5-20251001")
+    summarization_model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    max_posts        = source.get("max_posts", settings.get("max_posts_per_source", 10))
+
+    print(f"  Resolving {len(seed_refs)} seed papers ...")
+    seed_ids = []
+    for ref in seed_refs:
+        if pid := _resolve_seed(ref):
+            seed_ids.append(pid)
+    print(f"  Resolved {len(seed_ids)}/{len(seed_refs)} seeds")
+    if not seed_ids:
+        raise RuntimeError("No seeds resolved to Semantic Scholar IDs")
+
+    print(f"  Requesting up to {max_candidates} recommendations ...")
+    candidates = _s2_recommendations(seed_ids, limit=max_candidates)
+    print(f"  Got {len(candidates)} candidates")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    articles = []
+
+    for candidate in candidates:
+        if len(articles) >= max_posts:
+            break
+
+        url = _candidate_url(candidate)
+        if not url or url in seen_urls:
+            continue
+
+        pub_date = _candidate_date(candidate)
+        if pub_date and pub_date < cutoff:
+            continue
+
+        abstract = candidate.get("abstract") or ""
+        if len(abstract) < 100:
+            continue
+
+        title = (candidate.get("title") or "Untitled").strip()
+        score, reason = _score_mollick_likeness(title, abstract, scoring_model)
+        marker = "✓" if score >= score_threshold else "·"
+        print(f"  [{source['id']}] {marker} {score:>2}/20  {title[:55]}")
+
+        if score < score_threshold:
+            continue
+
+        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model)
+        if summary:
+            summary = f"_Mollick-likeness: {score}/20 — {reason}_\n\n{summary}"
+
+        articles.append({
+            "title": title,
+            "url": url,
+            "date": pub_date,
+            "source_id": source["id"],
+            "source_name": source["name"],
+            "source_type": "scholarly",
             "summary": summary,
         })
 

@@ -35,6 +35,15 @@ The dream: find new high-signal sources automatically, not mediocre ones.
 - [ ] Capture a taste signal (kept-reading vs skipped, or a thumbs-up/down) so ranking has ground truth
 - [ ] Once taste signal exists: rank candidates by predicted relevance, not just frequency
 
+## Scholarly papers (Mollick-style filter)
+
+Now wired up with Semantic Scholar recommendations + Claude-scored Mollick-likeness rubric. Improvements:
+
+- [ ] Add SSRN as a second source — Semantic Scholar coverage of SSRN is patchy and SSRN has a lot of Mollick-style working papers (HBS, Wharton, NYU Stern, law schools)
+- [ ] Add NBER as a third source — same gap reasoning
+- [ ] Auto-discover new seed papers — when Mollick himself cites/posts about a paper that scores well, auto-add to seeds
+- [ ] Better seed resolution — current title search hits 404/429 ~half the time; consider bulk lookup or fallback to DOI when titles fail
+
 ## Other ideas
 
 (Add as they come up.)
@@ -45,3 +54,4 @@ The dream: find new high-signal sources automatically, not mediocre ones.
 
 - 2026-05-06 — `youtube` fetcher with caption-preferred routing
 - 2026-05-06 — `add_source.py` URL-based add flow (RSS, Apple Podcasts, YouTube, Substack, HTML-with-feed)
+- 2026-05-07 — `scholarly` fetcher with Mollick-style filter (Semantic Scholar recommender + Claude-scored 0-20 rubric, threshold 14)

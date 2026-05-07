@@ -19,6 +19,8 @@ Plain functions, no classes, no framework. Fetchers (`fetch_rss`, `fetch_sitemap
 
 The `youtube` fetcher uses yt-dlp for everything — listing channel videos AND discovering caption track URLs. The `android` player_client is pinned because the `web` client returns empty subtitle dicts in CI, and `youtube-transcript-api` is IP-blocked from datacenter ranges (verified failing on GitHub Actions). Captions come back as json3 fetched directly via httpx. Videos without captions are skipped — Whisper fallback is on the wishlist. Lookback filtering doesn't apply to YouTube (flat extraction lacks per-video timestamps); `max_posts_per_source` and seen-URL dedup are the limiters.
 
+The `scholarly` fetcher uses Semantic Scholar's recommendation API seeded with curated "taste" papers (see `feeds.yaml`), then runs each candidate through a Claude Haiku call that scores Mollick-likeness 0-20 against the rubric inlined in `MOLLICK_RUBRIC_PROMPT`. Only papers ≥ `score_threshold` (default 14) get summarized via Sonnet and ingested. Cost: ~$0.10-0.15/run at 100 candidates. SSRN/NBER coverage in Semantic Scholar is patchy — adding those as separate sources is on the wishlist.
+
 ## Adding sources
 
 `python add_source.py <url> [--name "..."] [--id slug] [--keywords AI LLM] [--dry-run]` probes a URL, detects the right fetcher type (rss/podcast/youtube/sitemap), runs a lightweight preview (no Claude/Whisper calls), and appends to `feeds.yaml`. Handles RSS auto-discovery, Apple Podcasts (via iTunes Search API), YouTube channels, and Substack proxy-wrapping automatically.
