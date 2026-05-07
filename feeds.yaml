@@ -93,6 +93,11 @@ sources:
     type: youtube
     channel_url: https://www.youtube.com/@SequoiaCapital
 
+  - id: lennys-podcast
+    name: "Lenny's Podcast"
+    type: youtube
+    channel_url: https://www.youtube.com/@LennysPodcast
+
 settings:
   lookback_days: 3
   max_posts_per_source: 5
