@@ -126,7 +126,12 @@ def _fetch_youtube_transcript(video_id: str) -> Optional[str]:
 
     try:
         with yt_dlp.YoutubeDL(_yt_dlp_opts()) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            # process=False skips format selection (which can fail in CI even
+            # with download=False); subtitle URLs are still populated.
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={video_id}",
+                download=False, process=False,
+            )
     except Exception as e:
         print(f"    Caption metadata error: {e}")
         return None
