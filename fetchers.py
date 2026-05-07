@@ -95,6 +95,31 @@ def _extract_audio_url(entry) -> Optional[str]:
     return None
 
 
+def _extract_youtube_video_id(entry, url: str) -> Optional[str]:
+    """Pull the 11-char YouTube video ID from a feed entry or watch URL."""
+    if vid := entry.get("yt_videoid"):
+        return vid
+    match = re.search(r"(?:v=|/shorts/|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
+    return match.group(1) if match else None
+
+
+def _fetch_youtube_transcript(video_id: str) -> Optional[str]:
+    """Fetch captions (manual or auto-generated) for a YouTube video.
+    Free and instant — preferred over downloading audio + Whisper."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+    except ImportError:
+        print("    youtube-transcript-api not installed, skipping captions")
+        return None
+    try:
+        api = YouTubeTranscriptApi()
+        fetched = api.fetch(video_id)
+        return " ".join(seg.text for seg in fetched).strip() or None
+    except Exception as e:
+        print(f"    Caption fetch error: {e}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Text extraction
 # ---------------------------------------------------------------------------
@@ -263,6 +288,8 @@ def summarize(text: str, source_type: str = "rss", title: str = "",
         type_hint = "This is a podcast transcript. Focus on the main arguments and insights from each speaker. Ignore filler, ads, and tangential small talk.\n\n"
     elif source_type == "sitemap":
         type_hint = "This is a company blog post. Focus on product announcements, technical capabilities, and strategic implications.\n\n"
+    elif source_type == "youtube":
+        type_hint = "This is a YouTube video transcript from auto-generated or manual captions. Focus on the speakers' main arguments and insights. Captions can have transcription errors and miss visual context — work from the textual content you have.\n\n"
 
     # Keep prompt in sync with workers/summarize-api/worker.js
     prompt = (
@@ -482,6 +509,68 @@ def _parse_sitemap_xml(url: str, pattern: Optional[str] = None) -> list[dict]:
     except Exception as e:
         print(f"    Sitemap parse error for {url}: {e}")
         return []
+
+
+def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
+    """
+    Fetch videos from a YouTube channel via the channel's videos.xml feed.
+    Prefers captions (free, instant) over audio download + Whisper.
+    Videos without available captions are skipped.
+    """
+    feed_url = source.get("feed_url")
+    if not feed_url:
+        raise ValueError(f"No feed_url for youtube source {source['id']}")
+
+    feed = _fetch_feed(feed_url)
+    if feed.bozo and not feed.entries:
+        raise ValueError(f"Feed parse error: {feed.bozo_exception}")
+
+    lookback = datetime.now(timezone.utc) - timedelta(days=settings.get("lookback_days", 3))
+    max_posts = settings.get("max_posts_per_source", 5)
+    model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+
+    entries = []
+    for entry in feed.entries:
+        dt = _parse_feed_date(entry)
+        entries.append((dt, entry))
+    entries.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    articles = []
+    for dt, entry in entries:
+        if len(articles) >= max_posts:
+            break
+        if dt and dt < lookback:
+            continue
+
+        url = _extract_link(entry)
+        if not url or url in seen_urls:
+            continue
+
+        video_id = _extract_youtube_video_id(entry, url)
+        if not video_id:
+            continue
+
+        title = entry.get("title", "Untitled").strip()
+        print(f"  [{source['id']}] {title[:60]}")
+
+        transcript = _fetch_youtube_transcript(video_id)
+        if not transcript or len(transcript) < 100:
+            print(f"    Skipping — no captions available")
+            continue
+
+        summary = summarize(transcript, source_type="youtube", title=title, model=model)
+
+        articles.append({
+            "title": title,
+            "url": url,
+            "date": dt,
+            "source_id": source["id"],
+            "source_name": source["name"],
+            "source_type": "youtube",
+            "summary": summary,
+        })
+
+    return articles
 
 
 def fetch_podcast(source: dict, seen_urls: set, settings: dict) -> list[dict]:
