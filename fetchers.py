@@ -868,6 +868,108 @@ def _candidate_date(candidate: dict) -> Optional[datetime]:
     return None
 
 
+def _resolve_author(name: str) -> Optional[tuple[str, str]]:
+    """Resolve an author name to (authorId, canonical name).
+    Picks the most prolific match by paperCount — a proxy for the
+    famous person you actually meant when names collide."""
+    data = _s2_get(
+        "/graph/v1/author/search",
+        {"query": name, "fields": "authorId,name,paperCount", "limit": 10},
+    )
+    if not data:
+        return None
+    results = data.get("data") or []
+    if not results:
+        return None
+    best = max(results, key=lambda r: r.get("paperCount") or 0)
+    aid = best.get("authorId")
+    canonical = best.get("name") or name
+    return (aid, canonical) if aid else None
+
+
+def _fetch_author_papers(author_id: str, limit: int = 50) -> list:
+    """Recent papers for an author. The S2 endpoint doesn't guarantee date order,
+    so we fetch a wider window and sort client-side."""
+    data = _s2_get(
+        f"/graph/v1/author/{author_id}/papers",
+        {"fields": S2_FIELDS, "limit": limit},
+    )
+    if not data:
+        return []
+    papers = data.get("data") or []
+    papers.sort(
+        key=lambda p: p.get("publicationDate") or f"{p.get('year') or 0}-01-01",
+        reverse=True,
+    )
+    return papers
+
+
+def fetch_scholarly_authors(source: dict, seen_urls: set, settings: dict) -> list[dict]:
+    """
+    Watchlist source: pulls recent papers by named authors directly, with NO
+    Mollick-likeness scoring filter. Use this when you want full coverage of
+    an author's output regardless of abstract topic.
+    """
+    authors = source.get("authors") or []
+    if not authors:
+        raise ValueError(f"No authors list for {source['id']}")
+
+    lookback_days = source.get("lookback_days", 180)
+    max_posts = source.get("max_posts", settings.get("max_posts_per_source", 25))
+    summarization_model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+
+    print(f"  Resolving {len(authors)} authors ...")
+    resolved = []
+    for name in authors:
+        if pair := _resolve_author(name):
+            resolved.append((name, pair[0], pair[1]))
+    print(f"  Resolved {len(resolved)}/{len(authors)} authors")
+
+    pool = []
+    seen_pool = set()
+    for original_name, aid, canonical in resolved:
+        for paper in _fetch_author_papers(aid, limit=20):
+            url = _candidate_url(paper)
+            if not url or url in seen_urls or url in seen_pool:
+                continue
+            pub_date = _candidate_date(paper)
+            if pub_date and pub_date < cutoff:
+                continue
+            seen_pool.add(url)
+            pool.append((pub_date, paper, original_name, url))
+
+    pool.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    articles = []
+    for pub_date, paper, author_name, url in pool:
+        if len(articles) >= max_posts:
+            break
+        title = (paper.get("title") or "Untitled").strip()
+        abstract = paper.get("abstract") or ""
+        if len(abstract) < 100:
+            print(f"  [{source['id']}] · skip (no abstract): {title[:55]}")
+            continue
+
+        print(f"  [{source['id']}] ✓ {author_name}: {title[:55]}")
+        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model)
+        if summary:
+            summary = f"_Watchlist author: **{author_name}**_\n\n{summary}"
+
+        articles.append({
+            "title": title,
+            "url": url,
+            "date": pub_date,
+            "source_id": source["id"],
+            "source_name": source["name"],
+            "source_type": "scholarly",
+            "summary": summary,
+        })
+
+    return articles
+
+
 def fetch_scholarly_rss(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     """
     Academic-paper RSS feeds (SSRN eJournals, NBER recent-papers, etc.) with

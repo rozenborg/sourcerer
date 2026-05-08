@@ -159,6 +159,52 @@ sources:
       - "Intelligent financial system: how AI is transforming finance"
       - "Falling Asleep at the Wheel: Human/AI Collaboration in a Field Experiment on HR Recruiters"
 
+  # --- Author watchlist (full coverage; no Mollick-likeness scoring) ---
+  # Pulls every recent paper by these authors directly via Semantic Scholar's
+  # author/papers endpoint. Bypass the rubric — papers from these specific
+  # researchers are surfaced regardless of abstract content.
+  - id: scholarly-watchlist-authors
+    name: "Scholarly (Watchlist Authors)"
+    type: scholarly_authors
+    lookback_days: 180
+    max_posts: 25
+    authors:
+      # §8.1 — AI, work, productivity, organizations
+      - "Ethan Mollick"
+      - "Lilach Mollick"
+      - "Fabrizio Dell'Acqua"
+      - "Karim Lakhani"
+      - "Hila Lifshitz-Assaf"
+      - "Katherine Kellogg"
+      - "Raffaella Sadun"
+      - "Edward McFowland III"
+      - "Charles Ayoubi"
+      - "Lindsey Raymond"
+      - "Danielle Li"
+      - "Erik Brynjolfsson"
+      # §8.2 — Economics, labor, exposure
+      - "Edward Felten"
+      - "Manav Raj"
+      - "Robert Seamans"
+      - "David Autor"
+      - "Daron Acemoglu"
+      - "Mert Demirer"
+      - "Sida Peng"
+      - "Sonia Jaffe"
+      # §8.3 — Legal, compliance, reasoning-heavy
+      - "Daniel Schwarcz"
+      - "Jonathan Choi"
+      - "Sam Manning"
+      # §8.4 — Medicine, human-AI judgment
+      - "Ethan Goh"
+      - "Jonathan Chen"
+      - "Adam Rodman"
+      - "Eric Horvitz"
+      - "Anil Doshi"
+      - "Oliver Hauser"
+      - "Christian Terwiesch"
+      - "Lennart Meincke"
+
   # --- NBER working papers (Mollick-likeness scored) ---
   - id: scholarly-nber
     name: "NBER Working Papers (filtered)"

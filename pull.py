@@ -17,17 +17,18 @@ load_dotenv()
 
 from fetchers import (
     fetch_rss, fetch_sitemap, fetch_podcast, fetch_youtube,
-    fetch_scholarly, fetch_scholarly_rss,
+    fetch_scholarly, fetch_scholarly_rss, fetch_scholarly_authors,
 )
 
 
 FETCHERS = {
-    "rss":           fetch_rss,
-    "sitemap":       fetch_sitemap,
-    "podcast":       fetch_podcast,
-    "youtube":       fetch_youtube,
-    "scholarly":     fetch_scholarly,
-    "scholarly_rss": fetch_scholarly_rss,
+    "rss":               fetch_rss,
+    "sitemap":           fetch_sitemap,
+    "podcast":           fetch_podcast,
+    "youtube":           fetch_youtube,
+    "scholarly":         fetch_scholarly,
+    "scholarly_rss":     fetch_scholarly_rss,
+    "scholarly_authors": fetch_scholarly_authors,
 }
 
 
