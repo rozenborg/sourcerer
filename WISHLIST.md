@@ -37,12 +37,14 @@ The dream: find new high-signal sources automatically, not mediocre ones.
 
 ## Scholarly papers (Mollick-style filter)
 
-Now wired up with Semantic Scholar recommendations + Claude-scored Mollick-likeness rubric. Improvements:
+Wired up with Semantic Scholar recommendations + NBER + arXiv (HCI/Society), all scored by the same Claude rubric. Outstanding:
 
-- [ ] Add SSRN as a second source — Semantic Scholar coverage of SSRN is patchy and SSRN has a lot of Mollick-style working papers (HBS, Wharton, NYU Stern, law schools)
-- [ ] Add NBER as a third source — same gap reasoning
+- [x] Add NBER as a second source (RSS-based, scored)
+- [x] Add arXiv (cs.HC + cs.CY) as a third source
+- [ ] ~~Add SSRN as a source~~ — **dead end**: Elsevier deprecated public eJournal RSS after acquiring SSRN; site is anti-bot. The HBS/Wharton/NYU Stern/law-school working papers SSRN hosts are genuinely unreachable without scraping or paid access. Workarounds: monitor authors' personal pages directly, or wait for papers to land at NBER/arXiv/journals.
 - [ ] Auto-discover new seed papers — when Mollick himself cites/posts about a paper that scores well, auto-add to seeds
 - [ ] Better seed resolution — current title search hits 404/429 ~half the time; consider bulk lookup or fallback to DOI when titles fail
+- [ ] Add JAMA / NEJM AI / Nature Medicine RSS (medical decision-support evidence is high signal for human-AI judgment)
 
 ## Other ideas
 
@@ -55,3 +57,4 @@ Now wired up with Semantic Scholar recommendations + Claude-scored Mollick-liken
 - 2026-05-06 — `youtube` fetcher with caption-preferred routing
 - 2026-05-06 — `add_source.py` URL-based add flow (RSS, Apple Podcasts, YouTube, Substack, HTML-with-feed)
 - 2026-05-07 — `scholarly` fetcher with Mollick-style filter (Semantic Scholar recommender + Claude-scored 0-20 rubric, threshold 14)
+- 2026-05-08 — `scholarly_rss` fetcher (RSS feeds with same Mollick-likeness scoring); wired NBER + arXiv (cs.HC, cs.CY) as scholarly sources

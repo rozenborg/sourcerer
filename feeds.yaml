@@ -125,6 +125,29 @@ sources:
       - "AI-Powered Lawyering: AI Reasoning Models, Retrieval Augmented Generation, and the Future of Legal Practice"  # Schwarcz et al.
       - "Intelligent financial system: how AI is transforming finance"  # BIS Aldasoro et al.
 
+  # --- NBER working papers (Mollick-likeness scored) ---
+  - id: scholarly-nber
+    name: "NBER Working Papers (filtered)"
+    type: scholarly_rss
+    feed_urls:
+      - https://www.nber.org/rss/new.xml
+    score_threshold: 12
+    lookback_days: 60
+    max_posts: 10
+
+  # --- arXiv HCI + Computers and Society (Mollick-likeness scored) ---
+  # Skipping cs.AI (~500 entries/day, too noisy/expensive); cs.HC and cs.CY
+  # are the categories where AI-and-work papers actually live.
+  - id: scholarly-arxiv
+    name: "arXiv HCI + Society (filtered)"
+    type: scholarly_rss
+    feed_urls:
+      - https://export.arxiv.org/rss/cs.HC
+      - https://export.arxiv.org/rss/cs.CY
+    score_threshold: 14
+    lookback_days: 14
+    max_posts: 10
+
 settings:
   lookback_days: 3
   max_posts_per_source: 5

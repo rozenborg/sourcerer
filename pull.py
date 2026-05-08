@@ -15,15 +15,19 @@ from supabase import create_client, Client
 
 load_dotenv()
 
-from fetchers import fetch_rss, fetch_sitemap, fetch_podcast, fetch_youtube, fetch_scholarly
+from fetchers import (
+    fetch_rss, fetch_sitemap, fetch_podcast, fetch_youtube,
+    fetch_scholarly, fetch_scholarly_rss,
+)
 
 
 FETCHERS = {
-    "rss":       fetch_rss,
-    "sitemap":   fetch_sitemap,
-    "podcast":   fetch_podcast,
-    "youtube":   fetch_youtube,
-    "scholarly": fetch_scholarly,
+    "rss":           fetch_rss,
+    "sitemap":       fetch_sitemap,
+    "podcast":       fetch_podcast,
+    "youtube":       fetch_youtube,
+    "scholarly":     fetch_scholarly,
+    "scholarly_rss": fetch_scholarly_rss,
 }
 
 

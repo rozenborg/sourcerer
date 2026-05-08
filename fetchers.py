@@ -868,6 +868,95 @@ def _candidate_date(candidate: dict) -> Optional[datetime]:
     return None
 
 
+def fetch_scholarly_rss(source: dict, seen_urls: set, settings: dict) -> list[dict]:
+    """
+    Academic-paper RSS feeds (SSRN eJournals, NBER recent-papers, etc.) with
+    Mollick-likeness scoring applied per entry before summarization.
+    Use feed_urls (list) or feed_url (single) in the source config.
+    """
+    feed_urls = source.get("feed_urls")
+    if not feed_urls and (single := source.get("feed_url")):
+        feed_urls = [single]
+    if not feed_urls:
+        raise ValueError(f"No feed_urls/feed_url for {source['id']}")
+
+    score_threshold = source.get("score_threshold", 12)
+    lookback_days = source.get("lookback_days", 30)
+    max_posts = source.get("max_posts", settings.get("max_posts_per_source", 10))
+    scoring_model = source.get("scoring_model") or settings.get("scoring_model", "claude-haiku-4-5-20251001")
+    summarization_model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+
+    # Collect dated entries across feeds, deduped by link
+    pool = []
+    seen_in_pool = set()
+    for feed_url in feed_urls:
+        feed = _fetch_feed(feed_url)
+        if feed.bozo and not feed.entries:
+            print(f"    Feed parse error for {feed_url}: {feed.bozo_exception}")
+            continue
+        for entry in feed.entries:
+            link = _extract_link(entry)
+            if not link or link in seen_in_pool:
+                continue
+            seen_in_pool.add(link)
+            dt = _parse_feed_date(entry)
+            if dt and dt < cutoff:
+                continue
+            pool.append((dt, entry, link))
+
+    pool.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    articles = []
+    for dt, entry, url in pool:
+        if len(articles) >= max_posts:
+            break
+        if url in seen_urls:
+            continue
+
+        title = (entry.get("title") or "Untitled").strip()
+        # Pull abstract from RSS body, then summary, then description
+        raw_html = ""
+        for field in ("content", "summary_detail"):
+            obj = entry.get(field)
+            if isinstance(obj, list) and obj:
+                obj = obj[0]
+            if isinstance(obj, dict) and obj.get("value"):
+                raw_html = obj["value"]
+                break
+        if not raw_html:
+            raw_html = entry.get("summary") or entry.get("description") or ""
+        abstract = BeautifulSoup(raw_html, "html.parser").get_text(separator=" ", strip=True) if raw_html else ""
+        abstract = " ".join(abstract.split())
+
+        if len(abstract) < 200:
+            continue  # likely a stub or thin entry — skip rather than score
+
+        score, reason = _score_mollick_likeness(title, abstract, scoring_model)
+        marker = "✓" if score >= score_threshold else "·"
+        print(f"  [{source['id']}] {marker} {score:>2}/20  {title[:55]}")
+
+        if score < score_threshold:
+            continue
+
+        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model)
+        if summary:
+            summary = f"_Mollick-likeness: {score}/20 — {reason}_\n\n{summary}"
+
+        articles.append({
+            "title": title,
+            "url": url,
+            "date": dt,
+            "source_id": source["id"],
+            "source_name": source["name"],
+            "source_type": "scholarly",  # store as scholarly so DB queries treat them uniformly
+            "summary": summary,
+        })
+
+    return articles
+
+
 def fetch_scholarly(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     """
     Fetch scholarly papers via Semantic Scholar's recommendation API,
