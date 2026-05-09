@@ -15,17 +15,27 @@ Headless content database. GitHub Actions cron fetches sources in `feeds.yaml`, 
 
 ## Code style
 
-Plain functions, no classes, no framework. Fetchers (`fetch_rss`, `fetch_sitemap`, `fetch_podcast`, `fetch_youtube`) dispatched via the `FETCHERS` dict in `pull.py`. The simplicity is intentional — don't refactor toward abstractions. New fetchers should follow the same shape: `fetch_X(source, seen_urls, settings) -> list[article_dict]`.
+Plain functions, no classes, no framework. Seven fetcher types — `fetch_rss`, `fetch_sitemap`, `fetch_podcast`, `fetch_youtube`, `fetch_scholarly`, `fetch_scholarly_rss`, `fetch_scholarly_authors` — dispatched via the `FETCHERS` dict in `pull.py`. The simplicity is intentional — don't refactor toward abstractions. New fetchers should follow the same shape: `fetch_X(source, seen_urls, settings) -> list[article_dict]`.
 
-The `youtube` fetcher uses yt-dlp for everything — listing channel videos AND discovering caption track URLs. The `android` player_client is pinned because the `web` client returns empty subtitle dicts in CI, and `youtube-transcript-api` is IP-blocked from datacenter ranges (verified failing on GitHub Actions). Captions come back as json3 fetched directly via httpx. Videos without captions are skipped — Whisper fallback is on the wishlist. Lookback filtering doesn't apply to YouTube (flat extraction lacks per-video timestamps); `max_posts_per_source` and seen-URL dedup are the limiters.
+The `youtube` fetcher uses yt-dlp for everything — listing channel videos AND discovering caption track URLs. The `android` player_client is pinned because the `web` client returns empty subtitle dicts in CI, and `youtube-transcript-api` is IP-blocked from datacenter ranges (verified failing on GitHub Actions). Captions come back as json3 fetched directly via httpx. Videos without captions are skipped — Whisper fallback is on the wishlist. Lookback filtering doesn't apply to YouTube (flat extraction lacks per-video timestamps); `max_posts_per_source` and seen-URL dedup are the limiters. **Cookies caveat**: the `YOUTUBE_COOKIES` GitHub secret expires fast under datacenter-IP access patterns — typically every 1-3 days. When YouTube ingest stops working, re-export cookies and update the secret (or move to a self-hosted runner with a residential IP, which makes the problem permanent).
 
-The `scholarly` fetcher uses Semantic Scholar's recommendation API seeded with curated "taste" papers (see `feeds.yaml`), then runs each candidate through a Claude Haiku call that scores Mollick-likeness 0-20 against the rubric inlined in `MOLLICK_RUBRIC_PROMPT`. Only papers ≥ `score_threshold` (default 12) get summarized via Sonnet and ingested.
+The `scholarly` fetcher uses Semantic Scholar's recommendation API seeded with curated "taste" papers, then runs each candidate through a Claude Haiku call that scores Mollick-likeness 0-20 against the rubric inlined in `MOLLICK_RUBRIC_PROMPT`. Only papers ≥ `score_threshold` (default 12) get summarized via Sonnet and ingested. Seeds load from a pre-resolved JSONL bundle (`reference_material/ethan_mollick_seed_corpus_ids_bundle/...jsonl`) which has ~100 verified S2 paperIds — this dodges S2's aggressive title-search rate limit. Inline `seed_papers` in `feeds.yaml` is supported as overflow for new seeds added outside the bundle.
 
 The `scholarly_rss` fetcher applies the same Mollick-likeness rubric to academic RSS feeds — currently NBER's new-papers feed and arXiv (`cs.HC`, `cs.CY`). The cs.AI firehose is intentionally excluded (~500 entries/day = expensive scoring with low yield). SSRN was the original target here but Elsevier deprecated their public eJournal RSS after acquiring SSRN; the site is anti-bot and that ecosystem is genuinely unreachable without scraping.
 
+The `scholarly_authors` fetcher pulls **every** recent paper by named researchers via S2's author/papers endpoint — no scoring filter, full coverage. Watchlist authors come from §8 of the Mollick reference doc. **Known limitation**: name collisions cause false-positive ingests. Example: "Sida Peng" matches both a Microsoft developer-productivity researcher AND a separate ML/computer-vision researcher; the "pick most prolific" heuristic chose the wrong one in our first run. Fix when it bites: pin the right `authorId` directly in `feeds.yaml` (S2 endpoint accepts authorId in lieu of name).
+
 ## Adding sources
 
-`python add_source.py <url> [--name "..."] [--id slug] [--keywords AI LLM] [--dry-run]` probes a URL, detects the right fetcher type (rss/podcast/youtube/sitemap), runs a lightweight preview (no Claude/Whisper calls), and appends to `feeds.yaml`. Handles RSS auto-discovery, Apple Podcasts (via iTunes Search API), YouTube channels, and Substack proxy-wrapping automatically.
+`python add_source.py <url> [--name "..."] [--id slug] [--keywords AI LLM] [--dry-run]` probes a URL, detects the right fetcher type (rss/podcast/youtube/sitemap), runs a lightweight preview (no Claude/Whisper calls), and appends to `feeds.yaml`. Handles RSS auto-discovery, Apple Podcasts (via iTunes Search API), YouTube channels, and Substack proxy-wrapping automatically. **Does not yet support** the scholarly source types — those are configured by editing `feeds.yaml` directly.
+
+## Reference material
+
+The `reference_material/` directory holds context docs that shape how Sourcerer filters scholarly content:
+
+- `mollick_style_ai_research_monitoring_reference.md` — the 0-20 Mollick-likeness scoring rubric (§9.1) inlined in `MOLLICK_RUBRIC_PROMPT`, plus topical lane definitions
+- `ethan_mollick_semantic_scholar_seed_corpus.md` — the deeper reference with §6 thematic clusters, §7 highest-value 40 list, §8 author watchlist, §11 alternate scoring rubric
+- `ethan_mollick_seed_corpus_ids_bundle/` — the pre-resolved canonical IDs bundle the `scholarly` fetcher loads via `seed_jsonl`. Contains a CSV/MD/JSONL trio plus `semantic_scholar_bulk_resolver.py` for resolving the remaining UNRESOLVED rows.
 
 ## Wishlist
 
