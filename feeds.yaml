@@ -106,58 +106,14 @@ sources:
     max_candidates: 200       # wider net — recommender's tail starts to thin out beyond this
     max_posts: 15
     lookback_days: 90
-    seed_papers:
-      # === §7 "Highest-Value Initial Seed Set" — 40 papers approximating Mollick's selection function ===
-      # AI at work / productivity / professional performance
-      - "ARXIV:2302.06590"                                          # Peng et al. — GitHub Copilot productivity
-      - "DOI:10.1126/science.adh2586"                               # Noy & Zhang — ChatGPT writing productivity
-      - "ARXIV:2303.01157"                                          # Felten, Raj, Seamans — occupation exposure
-      - "Navigating the Jagged Technological Frontier: Field Experimental Evidence of the Effects of AI on Knowledge Worker Productivity and Quality"
-      - "Generative AI at Work"                                     # Brynjolfsson, Li, Raymond
-      - "The Cybernetic Teammate: A Field Experiment on Generative AI Reshaping Teamwork and Expertise"
-      - "The Effects of Generative AI on High-Skilled Work: Evidence from Three Field Experiments with Software Developers"
-      - "Lawyering in the Age of Artificial Intelligence"           # Choi & Schwarcz
-      - "AI-Powered Lawyering: AI Reasoning Models, Retrieval Augmented Generation, and the Future of Legal Practice"
-      - "Evaluations at Work: Measuring the Capabilities of GenAI in Use"
-      - "GDPval: Evaluating AI Model Performance on Real-World Economically Valuable Tasks"
-      - "Scaling Laws for Economic Productivity: Experimental Evidence in LLM-Assisted Translation"
-      # Creativity / innovation / ideation
-      - "Using Large Language Models for Idea Generation in Innovation"
-      - "The Crowdless Future? Generative AI and Creative Problem Solving"
-      - "DOI:10.1126/sciadv.adn5290"                                # Doshi & Hauser — creativity & homogenization
-      - "Prompting Diverse Ideas: Increasing AI Idea Variance"
-      # Education / learning / cognitive offloading
-      - "Generative AI Can Harm Learning"
-      - "AI Meets the Classroom: When Do Large Language Models Harm Learning?"
-      - "From Chalkboards to Chatbots: Evaluating the Impact of Generative AI on Learning Outcomes in Nigeria"
-      - "AI Tutoring Outperforms Active Learning"
-      - "The GPT Surprise: Offering Large Language Model Chat in a Massive Coding Class Reduced Engagement but Increased Exam Performance"
-      - "ARXIV:2506.08872"                                          # Kosmyna et al. — cognitive debt
-      # Medicine / expert judgment / overreliance
-      - "DOI:10.1001/jamanetworkopen.2024.40969"                    # Goh et al. — diagnostic reasoning RCT
-      - "Towards Accurate Differential Diagnosis with Large Language Models"
-      - "Comparing Physician and Artificial Intelligence Chatbot Responses to Patient Questions Posted to a Public Social Media Forum"
-      - "Towards Conversational Diagnostic AI"                      # AMIE
-      # Persuasion / social interaction / mental health
-      - "On the Conversational Persuasiveness of Large Language Models: A Randomized Controlled Trial"
-      - "Durably Reducing Conspiracy Beliefs Through Dialogues with AI"
-      - "Large Language Models Are Capable of Offering Cognitive Reappraisal, If Guided"
-      - "Chatbots and Mental Health: Insights into the Safety of Generative AI"
-      - "AI Companions Reduce Loneliness"
-      # Prompting / interaction design / reasoning
-      - "ARXIV:2201.11903"                                          # Chain-of-Thought Prompting (Wei et al.)
-      - "Quantifying Language Models' Sensitivity to Spurious Features in Prompt Design"
-      - "Re-Reading Improves Reasoning in Language Models"
-      - "Should We Respect LLMs? A Cross-Lingual Study on the Influence of Prompt Politeness on LLM Performance"
-      # Frontier capability / agents / benchmarks
-      - "ARXIV:2303.12712"                                          # Sparks of AGI (Bubeck et al.)
-      - "ARXIV:2303.08774"                                          # GPT-4 Technical Report
-      - "Algorithmic Progress in Language Models"
-      - "Measuring AI Ability to Complete Long Tasks"               # METR
-      - "The Illusion of Diminishing Returns: Measuring Long Horizon Execution in LLMs"
-      # Bonus seed kept from prior list (BIS finance, not in §7 but useful for finance-domain expansion)
-      - "Intelligent financial system: how AI is transforming finance"
-      - "Falling Asleep at the Wheel: Human/AI Collaboration in a Field Experiment on HR Recruiters"
+    # Pre-resolved canonical IDs bundle (~74 S2_RESOLVED + 28 EXTERNAL_ID_ONLY rows).
+    # Every seed has a verified ID — no S2 title-search calls needed.
+    seed_jsonl: reference_material/ethan_mollick_seed_corpus_ids_bundle/ethan_mollick_seed_corpus_with_canonical_ids.jsonl
+    # Restrict to A/B priority rows (drop C-priority weak attributions)
+    seed_priorities: ["A", "B"]
+    # Optional inline overflow — paste new DOIs/arXivs/titles here as you find them.
+    # Resolved at runtime. Leave empty if everything you want is in the bundle.
+    seed_papers: []
 
   # --- Author watchlist (full coverage; no Mollick-likeness scoring) ---
   # Pulls every recent paper by these authors directly via Semantic Scholar's

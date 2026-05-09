@@ -43,12 +43,12 @@ Wired up with Semantic Scholar recommendations + NBER + arXiv (HCI/Society), all
 - [x] Add arXiv (cs.HC + cs.CY) as a third source
 - [ ] ~~Add SSRN as a source~~ — **dead end**: Elsevier deprecated public eJournal RSS after acquiring SSRN; site is anti-bot. The HBS/Wharton/NYU Stern/law-school working papers SSRN hosts are genuinely unreachable without scraping or paid access. Workarounds: monitor authors' personal pages directly, or wait for papers to land at NBER/arXiv/journals.
 - [ ] Auto-discover new seed papers — when Mollick himself cites/posts about a paper that scores well, auto-add to seeds
-- [ ] Better seed resolution — current title search hits 404/429 ~half the time; consider bulk lookup or fallback to DOI when titles fail
+- [x] Look up canonical DOIs/arXiv IDs for unresolved seeds (delivered via JSONL bundle in `reference_material/`)
+- [x] Cache resolved S2 paperIds (effectively done — bundle pre-resolves them, no title-search calls at runtime)
+- [x] Apply the §8 author watchlist (delivered via `scholarly_authors` fetcher — watchlist authors bypass scoring entirely)
 - [ ] Add JAMA / NEJM AI / Nature Medicine RSS (medical decision-support evidence is high signal for human-AI judgment)
-- [ ] Apply the §7/§8 author watchlist as a soft scoring bonus — papers by Mollick, Dell'Acqua, Lakhani, Brynjolfsson, Goh, Schwarcz et al. get +2 on Mollick-likeness regardless of abstract content
 - [ ] Add the §11 hype penalty to the scoring rubric — deduct 0-3 for benchmark-only / no human baseline / vendor marketing / overclaiming
-- [ ] Cache resolved S2 paperIds to disk so we stop hitting the title-search rate-limit on every run
-- [ ] Look up canonical DOIs/arXiv IDs for the ~30 seeds that currently only have titles (manual one-time work; durable)
+- [ ] Resolve the 34 UNRESOLVED_LOOKUP_REQUIRED rows in the bundle (run the included `semantic_scholar_bulk_resolver.py` against the JSONL and merge results)
 
 ## Other ideas
 

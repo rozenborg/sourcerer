@@ -738,6 +738,54 @@ def _s2_get(path: str, params: dict | None = None, retries: int = 3) -> Optional
     return None
 
 
+def _load_seeds_from_jsonl(path: str, priorities: Optional[list] = None) -> list[str]:
+    """Load pre-resolved seed identifiers from a canonical-IDs JSONL bundle.
+    Each line is one paper with status, priority, and various external IDs.
+    Returns a list of S2-acceptable identifiers (paperId hashes or lookup keys
+    like 'DOI:...', 'CorpusID:...'). Skips ambiguous/duplicate/unresolved rows.
+    """
+    if not os.path.exists(path):
+        print(f"    seed JSONL not found: {path}")
+        return []
+
+    priorities_set = set(priorities) if priorities else None
+    USABLE_STATUSES = {"S2_RESOLVED", "EXTERNAL_ID_ONLY"}
+
+    seeds = []
+    skipped_status = 0
+    skipped_priority = 0
+    seen = set()
+
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if priorities_set and row.get("priority") not in priorities_set:
+                skipped_priority += 1
+                continue
+            if row.get("status") not in USABLE_STATUSES:
+                skipped_status += 1
+                continue
+
+            # Prefer the verified S2 paperId hash; fall back to canonical lookup key.
+            # Strip 'S2PaperID:' prefix since the API takes the bare hash.
+            seed_id = row.get("semantic_scholar_paper_id") or row.get("s2_api_lookup_key") or ""
+            if seed_id.startswith("S2PaperID:"):
+                seed_id = seed_id[len("S2PaperID:"):]
+            if seed_id and seed_id not in seen:
+                seen.add(seed_id)
+                seeds.append(seed_id)
+
+    print(f"    Loaded {len(seeds)} seeds from JSONL (skipped {skipped_status} non-resolvable, {skipped_priority} below priority)")
+    return seeds
+
+
 def _resolve_seed(ref: str) -> Optional[str]:
     """Resolve any seed reference (DOI, arXiv ID, URL, or title) to an S2 paperId."""
     # Normalize URL forms to canonical IDs
@@ -1065,9 +1113,10 @@ def fetch_scholarly(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     seeded with curated 'taste' papers, filtered by a Claude-scored
     Mollick-likeness rubric.
     """
-    seed_refs = source.get("seed_papers") or []
-    if not seed_refs:
-        raise ValueError(f"No seed_papers for scholarly source {source['id']}")
+    seed_refs = list(source.get("seed_papers") or [])
+    seed_jsonl = source.get("seed_jsonl")
+    if not seed_refs and not seed_jsonl:
+        raise ValueError(f"No seed_papers or seed_jsonl for scholarly source {source['id']}")
 
     score_threshold  = source.get("score_threshold", 14)
     max_candidates   = source.get("max_candidates", 100)
@@ -1076,12 +1125,31 @@ def fetch_scholarly(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     summarization_model = settings.get("summarization_model", "claude-sonnet-4-20250514")
     max_posts        = source.get("max_posts", settings.get("max_posts_per_source", 10))
 
-    print(f"  Resolving {len(seed_refs)} seed papers ...")
     seed_ids = []
-    for ref in seed_refs:
-        if pid := _resolve_seed(ref):
-            seed_ids.append(pid)
-    print(f"  Resolved {len(seed_ids)}/{len(seed_refs)} seeds")
+    seen_seed_ids = set()
+
+    # Pre-resolved seeds from a canonical-IDs JSONL bundle (no API calls needed)
+    if seed_jsonl:
+        jsonl_path = seed_jsonl if os.path.isabs(seed_jsonl) else os.path.join(os.path.dirname(__file__), seed_jsonl)
+        for sid in _load_seeds_from_jsonl(jsonl_path, priorities=source.get("seed_priorities")):
+            if sid not in seen_seed_ids:
+                seen_seed_ids.add(sid)
+                seed_ids.append(sid)
+
+    # Inline seeds (DOI/ARXIV/title strings) — resolved one-by-one
+    if seed_refs:
+        print(f"  Resolving {len(seed_refs)} inline seeds ...")
+        for ref in seed_refs:
+            if pid := _resolve_seed(ref):
+                if pid not in seen_seed_ids:
+                    seen_seed_ids.add(pid)
+                    seed_ids.append(pid)
+
+    # S2 recommendation endpoint accepts up to 100 positive paperIds
+    if len(seed_ids) > 100:
+        seed_ids = seed_ids[:100]
+
+    print(f"  Total seeds: {len(seed_ids)}")
     if not seed_ids:
         raise RuntimeError("No seeds resolved to Semantic Scholar IDs")
 
