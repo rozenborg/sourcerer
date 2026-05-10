@@ -1,0 +1,33 @@
+# Xcode
+build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+!default.xcworkspace
+xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.perspectivev3
+!default.perspectivev3
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+.swiftpm/
+
+# Secrets
+SourcererApp/Resources/Secrets.plist
+
+# macOS
+.DS_Store
+
+# Supabase CLI
+supabase/.branches
+supabase/.temp
