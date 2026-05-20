@@ -37,10 +37,10 @@ final class AuthService {
         isLoading = true
         defer { isLoading = false }
         do {
-            let session = try await client.auth.signInWithIdToken(
+            try await client.auth.signInWithIdToken(
                 credentials: .init(provider: .apple, idToken: idToken, nonce: nonce)
             )
-            self.session = session
+            await refreshSession()
             self.lastError = nil
         } catch {
             self.lastError = error.localizedDescription
@@ -62,12 +62,12 @@ final class AuthService {
         isLoading = true
         defer { isLoading = false }
         do {
-            let session = try await client.auth.verifyOTP(
+            try await client.auth.verifyOTP(
                 email: email,
                 token: token,
                 type: .email
             )
-            self.session = session
+            await refreshSession()
             self.lastError = nil
         } catch {
             self.lastError = error.localizedDescription

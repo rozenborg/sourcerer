@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    DEVELOPMENT_TEAM: ""   # Fill in your Apple Developer team ID after first open
+    DEVELOPMENT_TEAM: "3A38872634"   # Personal Team. Swap to paid team ID once that membership activates.
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
@@ -27,8 +27,6 @@ targets:
     platform: iOS
     sources:
       - path: SourcererApp
-        excludes:
-          - "Resources/Secrets.plist"   # never bake secrets into the bundle source list
     resources:
       - path: SourcererApp/Resources
     info:
@@ -51,8 +49,12 @@ targets:
         product: Supabase
       - package: MarkdownUI
         product: MarkdownUI
-    entitlements:
-      path: SourcererApp/SourcererApp.entitlements
-      properties:
-        com.apple.developer.applesignin:
-          - Default
+    # Sign in with Apple entitlement removed temporarily — Personal Team
+    # accounts can't sign apps with it. Restore the entitlements: block
+    # below once the paid Apple Developer Program membership activates:
+    #
+    # entitlements:
+    #   path: SourcererApp/SourcererApp.entitlements
+    #   properties:
+    #     com.apple.developer.applesignin:
+    #       - Default

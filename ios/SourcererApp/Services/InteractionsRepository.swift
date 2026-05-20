@@ -58,7 +58,7 @@ final class SupabaseInteractionsRepository: InteractionsRepository {
             .from("article_interactions")
             .update(patch)
             .eq("user_id", value: uid)
-            .eq("article_id", value: articleId)
+            .eq("article_id", value: Int(articleId))
             .execute()
     }
 
@@ -68,7 +68,7 @@ final class SupabaseInteractionsRepository: InteractionsRepository {
             .from("article_interactions")
             .select()
             .eq("user_id", value: uid)
-            .eq("article_id", value: articleId)
+            .eq("article_id", value: Int(articleId))
             .limit(1)
             .execute()
             .value

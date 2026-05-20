@@ -84,7 +84,7 @@ final class SupabaseArticleRepository: ArticleRepository {
         let rows: [Article] = try await client
             .from("articles")
             .select()
-            .eq("id", value: id)
+            .eq("id", value: Int(id))
             .limit(1)
             .execute()
             .value
