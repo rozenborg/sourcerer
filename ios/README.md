@@ -11,7 +11,9 @@ save and (later) decks on top.
 ## Prerequisites
 
 1. **Mac** with **Xcode 16+** (free, App Store).
-2. **Apple Developer Program** ($99/yr) — required for Sign in with Apple.
+2. **Apple Developer Program** membership — required for Sign in with Apple,
+   TestFlight, and App Store submission. Team ID `68J52LPHNX` is wired into
+   `project.yml`.
 3. [**xcodegen**](https://github.com/yonaskolb/XcodeGen) — generates the
    `.xcodeproj` from `project.yml`. `brew install xcodegen`.
 4. [**Supabase CLI**](https://supabase.com/docs/guides/cli) — applies
@@ -49,9 +51,15 @@ In Xcode, on first build:
 
 In the **Supabase dashboard**:
 - **Authentication > Providers**: enable **Email** and **Apple**.
-- For Apple, follow Supabase's Apple-OAuth guide to create a Services ID + key
-  in the Apple Developer portal. Redirect URL is
-  `https://<project-ref>.supabase.co/auth/v1/callback`.
+- For Apple, the app uses **native** Sign in with Apple (the
+  `SignInWithAppleButton` → `signInWithIdToken` flow in `AuthView.swift`).
+  Native flow only needs the App ID with the Sign in with Apple capability —
+  no Services ID required. Configure the Apple provider in Supabase by
+  setting the **Client IDs** field to your bundle id
+  (`com.rozenborg.sourcerer`); leave the Services ID + secret key empty
+  unless you later add a web/Android client. The redirect URL
+  `https://<project-ref>.supabase.co/auth/v1/callback` is only used by the
+  web OAuth flow we don't trigger.
 
 ## Layout
 
