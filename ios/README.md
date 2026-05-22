@@ -108,8 +108,12 @@ cd ios
 xcodebuild test \
   -project SourcererApp.xcodeproj \
   -scheme SourcererApp \
-  -destination 'platform=iOS Simulator,name=iPhone 15'
+  -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
+
+Replace `iPhone 17` with any installed simulator — `xcrun simctl list devices available`
+shows what you have. Xcode bundles a fresh set of simulators with each
+release, so the device name will drift over time.
 
 `AppEnvironment` accepts injected `(supabaseURL:, supabaseAnonKey:)` for
 tests/previews, with a no-arg `init()` that falls back to `Secrets.plist`
