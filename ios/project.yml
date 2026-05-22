@@ -53,3 +53,16 @@ targets:
       properties:
         com.apple.developer.applesignin:
           - Default
+
+  SourcererAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SourcererAppTests
+    dependencies:
+      - target: SourcererApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.rozenborg.sourcerer.tests
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"

@@ -9,15 +9,19 @@ final class AppEnvironment {
     let articles: ArticleRepository
     let interactions: InteractionsRepository
 
-    init() {
-        let (url, anonKey) = AppEnvironment.loadSecrets()
-        self.supabase = SupabaseClient(supabaseURL: url, supabaseKey: anonKey)
+    init(supabaseURL: URL, supabaseAnonKey: String) {
+        self.supabase = SupabaseClient(supabaseURL: supabaseURL, supabaseKey: supabaseAnonKey)
         self.auth = AuthService(client: supabase)
         self.articles = SupabaseArticleRepository(client: supabase)
         self.interactions = SupabaseInteractionsRepository(
             client: supabase,
             userId: { [weak auth] in auth?.userId }
         )
+    }
+
+    convenience init() {
+        let (url, anonKey) = AppEnvironment.loadSecrets()
+        self.init(supabaseURL: url, supabaseAnonKey: anonKey)
     }
 
     private static func loadSecrets() -> (URL, String) {

@@ -98,6 +98,23 @@ Two SQL files in `supabase/migrations/`:
 Apply them in numeric order. Re-runs are safe (`if not exists`, `drop policy
 if exists`).
 
+## Tests
+
+Unit tests live in `SourcererAppTests/` and use [Swift Testing](https://developer.apple.com/xcode/swift-testing/)
+(Xcode 16+). Run from Xcode with `Cmd+U`, or from the command line:
+
+```bash
+cd ios
+xcodebuild test \
+  -project SourcererApp.xcodeproj \
+  -scheme SourcererApp \
+  -destination 'platform=iOS Simulator,name=iPhone 15'
+```
+
+`AppEnvironment` accepts injected `(supabaseURL:, supabaseAnonKey:)` for
+tests/previews, with a no-arg `init()` that falls back to `Secrets.plist`
+for the live app.
+
 ## Phase 1 scope (this commit)
 
 - Apple + email auth.
