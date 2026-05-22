@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "orb_icon_transparent_1024.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
