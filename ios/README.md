@@ -141,6 +141,86 @@ release, so the device name will drift over time.
 tests/previews, with a no-arg `init()` that falls back to `Secrets.plist`
 for the live app.
 
+## Shipping to TestFlight
+
+Once you're ready to put a real signed build on your phone (and share with
+testers), here's the path. Assumes the paid Developer membership is active
+and the App ID for `com.rozenborg.sourcerer` is registered with Sign in
+with Apple capability.
+
+### One-time setup
+
+1. **Populate the AppIcon asset**. Drop a 1024×1024 PNG into Xcode by
+   opening `SourcererApp/Resources/Assets.xcassets`, selecting the AppIcon
+   slot, and dragging the image onto the "Single Size" well. Xcode 14+
+   generates all required sizes from the 1024×1024 source automatically.
+   **TestFlight will reject the upload if this is missing.**
+
+2. **Create the App Store Connect record**. Go to
+   [App Store Connect](https://appstoreconnect.apple.com) → My Apps →
+   "+" → New App.
+   - Platform: iOS
+   - Name: Sourcerer
+   - Primary Language: English (US)
+   - Bundle ID: `com.rozenborg.sourcerer` (must match the one in `project.yml`)
+   - SKU: any unique string, e.g. `sourcerer-ios-001`
+   - User Access: Full Access
+
+### Each upload
+
+1. In Xcode, set the scheme device to **"Any iOS Device (arm64)"** — not a
+   simulator, not a connected phone.
+2. **Product → Archive**. Takes a few minutes on first run; subsequent
+   archives are incremental.
+3. When the Organizer window opens, select the new archive → **Distribute App**.
+   - Method: **App Store Connect**
+   - Destination: **Upload**
+   - Signing: **Automatically manage signing**
+   - Click through validation; resolve any errors it surfaces.
+4. Upload. Takes ~1-2 minutes.
+5. The build appears in App Store Connect under **TestFlight → iOS Builds**
+   after ~10-30 min of "Processing." You'll get an email when it finishes.
+
+### Installing the build on your phone via TestFlight
+
+1. In App Store Connect, open the app → **TestFlight** tab → **Internal
+   Testing** group (create one called "Internal" if it doesn't exist).
+2. Add your Apple ID as an internal tester. Apple emails an invite.
+3. On the iPhone, install Apple's **TestFlight** app from the App Store.
+4. Tap the invite link in the email, or open TestFlight and redeem the
+   code. Sourcerer appears in the list — tap **Install**.
+
+After this point, the version of Sourcerer on your phone is the signed
+TestFlight build, not the Xcode dev build. To install dev builds
+alongside (via Cmd+R from Xcode), they install over the TestFlight one;
+you can switch back by tapping Install in TestFlight again.
+
+### Bumping versions
+
+`CURRENT_PROJECT_VERSION` in `project.yml` is the **build number** — every
+upload to App Store Connect must have a higher build number than any
+prior upload for the same `MARKETING_VERSION`. Bump it by editing
+`project.yml`, then `xcodegen` to regenerate. (E.g. `"1"` → `"2"` for the
+second upload.)
+
+### Privacy manifest
+
+`SourcererApp/Resources/PrivacyInfo.xcprivacy` declares the app's
+required-reason API usage (currently just `UserDefaults` with reason
+`CA92.1`). Apple's validator checks this on archive — if you add
+dependencies that use other declared APIs (FileTimestamp, SystemBootTime,
+DiskSpace, ActiveKeyboards), update the manifest to add those entries.
+Supabase SDK ships its own manifest so its usage is already covered.
+
+### Submitting to App Store (later)
+
+TestFlight unlocks immediate distribution to your own testers without
+review. Public App Store submission is a separate process from the same
+App Store Connect record: requires screenshots, app description,
+privacy policy URL, support URL, age rating, and Account Deletion flow
+(Apple Guideline 5.1.1(v) — not yet implemented). Not blocking your
+TestFlight push.
+
 ## Phase 1 scope (this commit)
 
 - Apple + email auth.
