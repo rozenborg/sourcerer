@@ -2,11 +2,13 @@ import SwiftUI
 
 struct FeedView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(AuthService.self) private var auth
 
     @State private var articles: [Article] = []
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var endReached = false
+    @State private var showSignOutConfirm = false
 
     private let pageSize = 30
 
@@ -38,6 +40,26 @@ struct FeedView: View {
             .navigationTitle("Feed")
             .navigationDestination(for: Article.self) { article in
                 ArticleDetailView(article: article)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSignOutConfirm = true
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
+                    .accessibilityLabel("Account")
+                }
+            }
+            .confirmationDialog(
+                "Sign out?",
+                isPresented: $showSignOutConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Sign out", role: .destructive) {
+                    Task { await auth.signOut() }
+                }
+                Button("Cancel", role: .cancel) {}
             }
             .refreshable { await refresh() }
             .task {
