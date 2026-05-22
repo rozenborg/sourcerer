@@ -48,3 +48,17 @@ struct StarredView: View {
         }
     }
 }
+
+#Preview("With items") {
+    let env = AppEnvironment.preview()
+    return StarredView()
+        .environment(env)
+        .environment(env.auth)
+}
+
+#Preview("Empty") {
+    let env = AppEnvironment.preview(articles: PreviewArticleRepository(starred: []))
+    return StarredView()
+        .environment(env)
+        .environment(env.auth)
+}

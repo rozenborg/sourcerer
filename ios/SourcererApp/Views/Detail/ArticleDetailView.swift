@@ -124,3 +124,12 @@ struct ArticleDetailView: View {
         }
     }
 }
+
+#Preview {
+    let env = AppEnvironment.preview()
+    return NavigationStack {
+        ArticleDetailView(article: MockData.articles[0])
+    }
+    .environment(env)
+    .environment(env.auth)
+}

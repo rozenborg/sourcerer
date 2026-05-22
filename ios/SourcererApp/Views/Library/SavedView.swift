@@ -48,3 +48,17 @@ struct SavedView: View {
         }
     }
 }
+
+#Preview("With items") {
+    let env = AppEnvironment.preview()
+    return SavedView()
+        .environment(env)
+        .environment(env.auth)
+}
+
+#Preview("Empty") {
+    let env = AppEnvironment.preview(articles: PreviewArticleRepository(saved: []))
+    return SavedView()
+        .environment(env)
+        .environment(env.auth)
+}

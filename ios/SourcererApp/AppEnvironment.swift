@@ -9,15 +9,33 @@ final class AppEnvironment {
     let articles: ArticleRepository
     let interactions: InteractionsRepository
 
-    init() {
-        let (url, anonKey) = AppEnvironment.loadSecrets()
-        self.supabase = SupabaseClient(supabaseURL: url, supabaseKey: anonKey)
+    init(supabaseURL: URL, supabaseAnonKey: String) {
+        self.supabase = SupabaseClient(supabaseURL: supabaseURL, supabaseKey: supabaseAnonKey)
         self.auth = AuthService(client: supabase)
         self.articles = SupabaseArticleRepository(client: supabase)
         self.interactions = SupabaseInteractionsRepository(
             client: supabase,
             userId: { [weak auth] in auth?.userId }
         )
+    }
+
+    /// Full-DI init for previews and tests — accepts pre-built dependencies so
+    /// the live Supabase repositories can be swapped for fakes.
+    init(
+        supabase: SupabaseClient,
+        auth: AuthService,
+        articles: ArticleRepository,
+        interactions: InteractionsRepository
+    ) {
+        self.supabase = supabase
+        self.auth = auth
+        self.articles = articles
+        self.interactions = interactions
+    }
+
+    convenience init() {
+        let (url, anonKey) = AppEnvironment.loadSecrets()
+        self.init(supabaseURL: url, supabaseAnonKey: anonKey)
     }
 
     private static func loadSecrets() -> (URL, String) {
