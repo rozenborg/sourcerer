@@ -1,6 +1,8 @@
 import SwiftUI
+import Inject
 
 struct FeedView: View {
+    @ObserveInjection var inject
     @Environment(AppEnvironment.self) private var env
     @Environment(AuthService.self) private var auth
 
@@ -66,6 +68,7 @@ struct FeedView: View {
                 if articles.isEmpty { await refresh() }
             }
         }
+        .enableInjection()
     }
 
     private func refresh() async {
@@ -92,4 +95,11 @@ struct FeedView: View {
             loadError = error.localizedDescription
         }
     }
+}
+
+#Preview {
+    let env = AppEnvironment.preview()
+    return FeedView()
+        .environment(env)
+        .environment(env.auth)
 }

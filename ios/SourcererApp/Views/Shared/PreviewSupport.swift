@@ -10,6 +10,53 @@ enum PreviewSupabase {
     )
 }
 
+final class PreviewArticleRepository: ArticleRepository {
+    var feed: [Article]
+    var starred: [(Article, Date)]
+    var saved: [(Article, Date)]
+
+    init(
+        feed: [Article] = MockData.articles,
+        starred: [(Article, Date)] = MockData.articles.prefix(2).map { ($0, Date()) },
+        saved: [(Article, Date)] = MockData.articles.suffix(2).map { ($0, Date()) }
+    ) {
+        self.feed = feed
+        self.starred = starred
+        self.saved = saved
+    }
+
+    func listFeed(beforeFetchedAt cursor: Date?, limit: Int) async throws -> [Article] { feed }
+    func listStarred(limit: Int) async throws -> [(Article, Date)] { starred }
+    func listSaved(limit: Int) async throws -> [(Article, Date)] { saved }
+    func search(query: String, limit: Int) async throws -> [Article] {
+        feed.filter { ($0.title ?? "").localizedCaseInsensitiveContains(query) }
+    }
+    func byId(_ id: Int64) async throws -> Article? { feed.first { $0.id == id } }
+}
+
+final class PreviewInteractionsRepository: InteractionsRepository {
+    func setAction(_ action: InteractionAction, articleId: Int64) async throws {}
+    func clearAction(_ action: InteractionAction, articleId: Int64) async throws {}
+    func interaction(for articleId: Int64) async throws -> ArticleInteraction? { nil }
+}
+
+@MainActor
+extension AppEnvironment {
+    /// Construct an environment backed by in-memory fakes — for SwiftUI Previews.
+    static func preview(
+        articles: ArticleRepository = PreviewArticleRepository(),
+        interactions: InteractionsRepository = PreviewInteractionsRepository()
+    ) -> AppEnvironment {
+        let client = PreviewSupabase.client
+        return AppEnvironment(
+            supabase: client,
+            auth: AuthService(client: client),
+            articles: articles,
+            interactions: interactions
+        )
+    }
+}
+
 enum MockData {
     static let articles: [Article] = [
         Article(

@@ -1,6 +1,8 @@
 import SwiftUI
+import Inject
 
 struct SavedView: View {
+    @ObserveInjection var inject
     @Environment(AppEnvironment.self) private var env
     @State private var rows: [(Article, Date)] = []
     @State private var loadError: String?
@@ -35,6 +37,7 @@ struct SavedView: View {
             .refreshable { await load() }
             .task { await load() }
         }
+        .enableInjection()
     }
 
     private func load() async {
@@ -47,4 +50,18 @@ struct SavedView: View {
             loadError = error.localizedDescription
         }
     }
+}
+
+#Preview("With items") {
+    let env = AppEnvironment.preview()
+    return SavedView()
+        .environment(env)
+        .environment(env.auth)
+}
+
+#Preview("Empty") {
+    let env = AppEnvironment.preview(articles: PreviewArticleRepository(saved: []))
+    return SavedView()
+        .environment(env)
+        .environment(env.auth)
 }

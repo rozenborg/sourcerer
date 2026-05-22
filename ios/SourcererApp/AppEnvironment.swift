@@ -19,6 +19,20 @@ final class AppEnvironment {
         )
     }
 
+    /// Full-DI init for previews and tests — accepts pre-built dependencies so
+    /// the live Supabase repositories can be swapped for fakes.
+    init(
+        supabase: SupabaseClient,
+        auth: AuthService,
+        articles: ArticleRepository,
+        interactions: InteractionsRepository
+    ) {
+        self.supabase = supabase
+        self.auth = auth
+        self.articles = articles
+        self.interactions = interactions
+    }
+
     convenience init() {
         let (url, anonKey) = AppEnvironment.loadSecrets()
         self.init(supabaseURL: url, supabaseAnonKey: anonKey)

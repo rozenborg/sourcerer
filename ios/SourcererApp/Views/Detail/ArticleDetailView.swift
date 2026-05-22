@@ -1,7 +1,9 @@
 import SwiftUI
 import MarkdownUI
+import Inject
 
 struct ArticleDetailView: View {
+    @ObserveInjection var inject
     let article: Article
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openURL) private var openURL
@@ -57,6 +59,7 @@ struct ArticleDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadInteraction() }
+        .enableInjection()
     }
 
     private var actionRow: some View {
@@ -123,4 +126,13 @@ struct ArticleDetailView: View {
             actionError = error.localizedDescription
         }
     }
+}
+
+#Preview {
+    let env = AppEnvironment.preview()
+    return NavigationStack {
+        ArticleDetailView(article: MockData.articles[0])
+    }
+    .environment(env)
+    .environment(env.auth)
 }

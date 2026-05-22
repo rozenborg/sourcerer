@@ -98,6 +98,57 @@ Two SQL files in `supabase/migrations/`:
 Apply them in numeric order. Re-runs are safe (`if not exists`, `drop policy
 if exists`).
 
+## Development loop
+
+Two tools, both layered into the project — pick whichever fits the change
+you're making.
+
+### SwiftUI Previews
+
+Every top-level view has a `#Preview` block backed by `MockData.articles`
+and `AppEnvironment.preview()` (both in
+`SourcererApp/Views/Shared/PreviewSupport.swift`). Open any view file in
+Xcode and the preview canvas renders instantly without needing to launch
+the app. Best for component-level work (typography, spacing, individual
+state variants).
+
+To preview an alternate state, instantiate a custom
+`PreviewArticleRepository`:
+
+```swift
+#Preview("Empty") {
+    let env = AppEnvironment.preview(articles: PreviewArticleRepository(starred: []))
+    return StarredView().environment(env).environment(env.auth)
+}
+```
+
+### Inject (hot-reload on a running device or simulator)
+
+Top-level views are wrapped with `@ObserveInjection var inject` +
+`.enableInjection()` from the [Inject](https://github.com/krzysztofzablocki/Inject)
+library. Editing a view body + saving triggers a sub-second view-tree swap
+in the running app — no rebuild, no relaunch, no lost state.
+
+One-time setup:
+
+1. Install the **Inject** Mac app (App Store, free) — formerly known as
+   InjectionIII. https://github.com/krzysztofzablocki/Inject#install-injection-app
+2. Launch Inject and point it at the project root (the directory
+   containing `SourcererApp.xcodeproj`).
+3. Build and run the app from Xcode (Cmd+R) on simulator or device.
+4. Edit a view body, save (Cmd+S). The change appears in the running app
+   in ~1s. The console prints a "💉 Injected" line on success.
+
+This is DEBUG-only — the `-Xlinker -interposable` linker flag and the
+`Inject` package are stripped from release builds, so nothing related to
+hot-reload ever ships to TestFlight / App Store.
+
+**Gotchas**:
+- Inject swaps view bodies, not stored state. If you change a `@State`
+  property's *initial value*, restart the app to see the new initial.
+- Don't wrap subviews that capture `@State` closures across the reload
+  boundary — those can crash on injection. Stick to top-level views.
+
 ## Tests
 
 Unit tests live in `SourcererAppTests/` and use [Swift Testing](https://developer.apple.com/xcode/swift-testing/)
