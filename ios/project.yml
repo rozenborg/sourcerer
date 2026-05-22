@@ -53,6 +53,9 @@ targets:
       properties:
         com.apple.developer.applesignin:
           - Default
+    scheme:
+      testTargets:
+        - SourcererAppTests
 
   SourcererAppTests:
     type: bundle.unit-test
