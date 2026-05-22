@@ -1,10 +1,8 @@
 import SwiftUI
 import AuthenticationServices
 import CryptoKit
-import Inject
 
 struct AuthView: View {
-    @ObserveInjection var inject
     @Environment(AuthService.self) private var auth
     @State private var nonce: String = ""
     @State private var email: String = ""
@@ -90,7 +88,6 @@ struct AuthView: View {
             Spacer()
         }
         .padding(24)
-        .enableInjection()
     }
 
     private func handleAppleResult(_ result: Result<ASAuthorization, Error>) {

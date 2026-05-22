@@ -1,8 +1,6 @@
 import SwiftUI
-import Inject
 
 struct ArticleCard: View {
-    @ObserveInjection var inject
     let article: Article
 
     private var parsed: ParsedSummary { ParsedSummary.parse(article.summary) }
@@ -50,7 +48,6 @@ struct ArticleCard: View {
             }
         }
         .padding(.vertical, 6)
-        .enableInjection()
     }
 
     private var titleFont: Font {
