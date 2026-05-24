@@ -1,6 +1,9 @@
 import SwiftUI
 import MarkdownUI
 
+/// Article detail — the new design language. Topic chip + italic display
+/// title + serif body. Action row maps to existing interactions (pass/star/
+/// save) until full rating + deep-mode tables ship.
 struct ArticleDetailView: View {
     let article: Article
     @Environment(AppEnvironment.self) private var env
@@ -8,91 +11,134 @@ struct ArticleDetailView: View {
 
     @State private var interaction: ArticleInteraction?
     @State private var actionError: String?
+    @State private var showRatingSheet = false
 
     private var parsed: ParsedSummary { ParsedSummary.parse(article.summary) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    SourceBadge(sourceType: article.sourceType)
-                    if let prefix = parsed.prefixTag {
-                        Text(prefix).font(.caption).foregroundStyle(.secondary)
+        ZStack {
+            PageBackground(atmosphere: .calm)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 8) {
+                        TopicChip(topic: article.topic)
+                        if let prefix = parsed.prefixTag {
+                            Text(prefix.uppercased())
+                                .font(Theme.Typography.meta(9, weight: .bold))
+                                .tracking(0.6)
+                                .foregroundStyle(Theme.Color.stone300)
+                        }
+                        Spacer()
+                        Text(metaSourceLine)
+                            .font(Theme.Typography.meta(10))
+                            .tracking(0.4)
+                            .foregroundStyle(Theme.Color.stone300)
+                            .lineLimit(1)
                     }
-                    Spacer()
-                    if let sourceName = article.sourceName {
-                        Text(sourceName).font(.caption).foregroundStyle(.secondary)
+
+                    if let title = article.title, !title.isEmpty {
+                        Text(title)
+                            .font(Theme.Typography.display(34))
+                            .kerning(-0.6)
+                            .foregroundStyle(Theme.Color.ink)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                }
 
-                if let title = article.title, !title.isEmpty {
-                    Text(title).font(.largeTitle.weight(.semibold))
-                }
+                    if let headline = parsed.headline {
+                        Text(headline)
+                            .font(Theme.Typography.serif(18, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                if let headline = parsed.headline {
-                    Text(headline).font(.title3.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
+                    Theme.Color.stone200.frame(height: 1)
 
-                Divider()
+                    if !parsed.body.isEmpty {
+                        Markdown(parsed.body)
+                            .markdownTheme(.basic)
+                    }
 
-                if !parsed.body.isEmpty {
-                    Markdown(parsed.body)
-                        .markdownTheme(.basic)
-                }
+                    actionRow
+                        .padding(.top, 8)
 
-                actionRow
-                    .padding(.top, 8)
-
-                Button {
-                    if let url = URL(string: article.url) { openURL(url) }
-                } label: {
-                    Label("Open original", systemImage: "arrow.up.right.square")
+                    Button {
+                        if let url = URL(string: article.url) { openURL(url) }
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.up.right.square")
+                            Text("Open original")
+                                .font(Theme.Typography.meta(11, weight: .bold))
+                                .tracking(0.6)
+                        }
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 14)
+                        .background(Theme.Color.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: Theme.Color.accent.opacity(0.32), radius: 12)
+                        .shadow(color: Color.black.opacity(0.18), radius: 7, y: 4)
+                    }
+                    .buttonStyle(.plain)
+
+                    if let actionError {
+                        Text(actionError)
+                            .font(Theme.Typography.body(12))
+                            .foregroundStyle(.red)
+                    }
                 }
-                .buttonStyle(.bordered)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 20)
             }
-            .padding(20)
         }
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadInteraction() }
+        .sheet(isPresented: $showRatingSheet) {
+            RatingSheet(article: article) { sparks, _ in
+                Task { await applyRating(sparks: sparks) }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var metaSourceLine: String {
+        var parts: [String] = []
+        if let s = article.sourceName ?? Optional(article.sourceId) { parts.append(s.uppercased()) }
+        parts.append("\(article.readMinutes)M")
+        return parts.joined(separator: " · ")
     }
 
     private var actionRow: some View {
-        HStack(spacing: 12) {
-            actionButton(.pass, label: "Pass", icon: "xmark.circle", tint: .gray,
-                         active: interaction?.isPassed == true)
-            actionButton(.star, label: "Star", icon: "star", tint: .yellow,
-                         active: interaction?.isStarred == true)
-            actionButton(.save, label: "Save", icon: "bookmark", tint: .blue,
-                         active: interaction?.isSaved == true)
+        HStack(spacing: 10) {
+            actionButton("Skip", icon: "xmark", on: interaction?.isPassed == true, tint: Theme.Color.stone300) {
+                Task { await toggle(.pass) }
+            }
+            actionButton("Spark", icon: "star", on: interaction?.isStarred == true, tint: Theme.Color.accent) {
+                showRatingSheet = true
+            }
+            actionButton("Save", icon: "bookmark", on: interaction?.isSaved == true, tint: Theme.Color.sage) {
+                Task { await toggle(.save) }
+            }
         }
     }
 
     @ViewBuilder
-    private func actionButton(_ action: InteractionAction,
-                              label: String,
-                              icon: String,
-                              tint: Color,
-                              active: Bool) -> some View {
-        Button {
-            Task { await toggle(action) }
-        } label: {
+    private func actionButton(_ label: String, icon: String, on: Bool, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: active ? "\(icon).fill" : icon)
-                    .font(.title3)
-                Text(label).font(.caption)
+                Image(systemName: on ? "\(icon).fill" : icon)
+                    .font(.system(size: 16))
+                Text(label.uppercased())
+                    .font(Theme.Typography.meta(10, weight: .bold))
+                    .tracking(0.6)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(active ? tint.opacity(0.18) : Color.clear,
-                        in: .rect(cornerRadius: 10))
-            .foregroundStyle(active ? tint : .primary)
+            .padding(.vertical, 12)
+            .background(on ? tint.opacity(0.18) : Theme.Color.stone0, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(.tertiary, lineWidth: active ? 0 : 0.5)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(on ? tint : Theme.Color.stone200, lineWidth: on ? 1.5 : 1)
             )
+            .foregroundStyle(on ? tint : Theme.Color.inkSoft)
         }
         .buttonStyle(.plain)
     }
@@ -108,9 +154,9 @@ struct ArticleDetailView: View {
     private func toggle(_ action: InteractionAction) async {
         let alreadyActive: Bool
         switch action {
-        case .pass: alreadyActive = interaction?.isPassed  == true
+        case .pass: alreadyActive = interaction?.isPassed == true
         case .star: alreadyActive = interaction?.isStarred == true
-        case .save: alreadyActive = interaction?.isSaved   == true
+        case .save: alreadyActive = interaction?.isSaved == true
         }
         do {
             if alreadyActive {
@@ -123,13 +169,21 @@ struct ArticleDetailView: View {
             actionError = error.localizedDescription
         }
     }
-}
 
-#Preview {
-    let env = AppEnvironment.preview()
-    return NavigationStack {
-        ArticleDetailView(article: MockData.articles[0])
+    private func applyRating(sparks: Int) async {
+        guard sparks > 0 else { return }
+        do {
+            if sparks <= 2 {
+                try await env.interactions.setAction(.pass, articleId: article.id)
+            } else {
+                try await env.interactions.setAction(.star, articleId: article.id)
+                if sparks >= 4 {
+                    try await env.interactions.setAction(.save, articleId: article.id)
+                }
+            }
+            await loadInteraction()
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
-    .environment(env)
-    .environment(env.auth)
 }

@@ -1,6 +1,12 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Sourcerer
 
-Headless content database. GitHub Actions cron fetches sources in `feeds.yaml`, summarizes via Claude, upserts into Supabase.
+Headless content database. GitHub Actions cron fetches sources in `feeds.yaml`, summarizes via Claude, upserts into Supabase. The pipeline is the source of truth; any consumer (iOS app, MCP servers, dashboards) reads from Supabase.
+
+Pipeline shape: `feeds.yaml → pull.py → fetchers.py (FETCHERS dispatch + summarize via Claude) → Supabase.articles`. `pull.py` is the thin orchestrator that loads `feeds.yaml`, fetches the per-source `seen_urls` set from Supabase, dispatches by `type`, and upserts results with a `source_runs` row per source.
 
 ## How runs happen
 
@@ -10,7 +16,7 @@ Headless content database. GitHub Actions cron fetches sources in `feeds.yaml`, 
 ## Non-obvious things
 
 - **Substack proxy**: `substack-proxy.rozenborg.workers.dev` is our own Cloudflare worker, not a third-party service. Substack/Cloudflare-protected feeds must be wrapped with it (see existing entries in `feeds.yaml`).
-- **Sibling worker**: `fetchers.py` references `workers/summarize-api/worker.js` (a separate Cloudflare worker). The summarization prompt is duplicated between `summarize()` in `fetchers.py` and the worker — keep them in sync if either changes.
+- **Sibling worker**: a comment in `summarize()` at [fetchers.py:344](fetchers.py#L344) references `workers/summarize-api/worker.js`. That worker lives in a separate repo (not in this tree). The summarization prompt is duplicated between `summarize()` here and the worker — keep them in sync if either changes.
 - **Supabase URL**: it's `https://<project-id>.supabase.co` (API endpoint), **not** `https://supabase.com/dashboard/project/<project-id>` (dashboard UI). Easy mistake when copying from the browser.
 
 ## Code style
@@ -36,6 +42,16 @@ The `reference_material/` directory holds context docs that shape how Sourcerer 
 - `mollick_style_ai_research_monitoring_reference.md` — the 0-20 Mollick-likeness scoring rubric (§9.1) inlined in `MOLLICK_RUBRIC_PROMPT`, plus topical lane definitions
 - `ethan_mollick_semantic_scholar_seed_corpus.md` — the deeper reference with §6 thematic clusters, §7 highest-value 40 list, §8 author watchlist, §11 alternate scoring rubric
 - `ethan_mollick_seed_corpus_ids_bundle/` — the pre-resolved canonical IDs bundle the `scholarly` fetcher loads via `seed_jsonl`. Contains a CSV/MD/JSONL trio plus `semantic_scholar_bulk_resolver.py` for resolving the remaining UNRESOLVED rows.
+
+## iOS app
+
+The `ios/` directory holds a SwiftUI client (`SourcererApp`) that reads from the same Supabase project the pipeline writes to and layers per-user pass/star/save on top. It currently lives in this repo while being stabilized and will be extracted to `sourcerer-ios` later. Setup, project generation (`xcodegen` from `project.yml`), and Supabase migration steps (`ios/supabase/migrations/`) live in [ios/README.md](ios/README.md). The pipeline does not depend on the iOS app — pipeline-only changes should not touch `ios/`.
+
+Note: the canonical pipeline schema is `schema.sql` at the repo root (`articles`, `source_runs`, `source_health` view). `ios/supabase/migrations/` is additive user-state on top of that.
+
+## Learnings log
+
+[LEARNINGS.md](LEARNINGS.md) is a running log of tool quirks, setup gotchas, and debug wins discovered while building. Check it before troubleshooting — same obstacle may already be solved. Append a tight entry (1–3 lines, dated) when a new obstacle is overcome; graduate entries into this file when they become permanent project knowledge.
 
 ## Wishlist
 
