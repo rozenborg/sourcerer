@@ -18,6 +18,7 @@ after the main pull cron).
 import os
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 from dotenv import load_dotenv
@@ -52,14 +53,17 @@ def main():
     fallback_model = settings.get("summarization_fallback_model", "claude-sonnet-4-6")
     max_tokens     = settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS)
 
-    pending = (
+    # Supabase SDK types .data as list[dict[str, JSON]] where JSON is a
+    # permissive union. We know the actual schema, so cast explicitly to
+    # keep Pyright from flagging .get()/[] access on every field.
+    pending = cast(list[dict[str, Any]], (
         sb.table("articles")
         .select("id, title, url, source_type, source_id")
         .is_("summary", "null")
         .order("fetched_at", desc=False)
         .execute()
         .data
-    )
+    ) or [])
 
     if not pending:
         print("No pending articles. Nothing to do.")
