@@ -30,8 +30,14 @@ create table if not exists source_runs (
 
 create index if not exists source_runs_source_id_idx on source_runs (source_id, ran_at desc);
 
--- Convenience view: latest run per source
-create or replace view source_health as
+-- Convenience view: latest run per source.
+-- security_invoker = true runs the view as the querying user (respects
+-- their RLS on source_runs) rather than as the view creator (Supabase's
+-- default, which Supabase Advisor flags as "Security Definer View").
+drop view if exists source_health;
+create view source_health
+  with (security_invoker = true)
+  as
 select distinct on (source_id)
   source_id,
   ran_at      as last_run_at,
