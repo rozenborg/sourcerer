@@ -314,9 +314,88 @@ def _transcribe_chunked(path: str, tmp_dir: str, client) -> Optional[str]:
 # Summarization
 # ---------------------------------------------------------------------------
 
-def summarize(text: str, source_type: str = "rss", title: str = "",
-              model: str = "claude-sonnet-4-20250514") -> Optional[str]:
-    """Summarize text via Claude API. Returns a punchy headline + detailed bullets."""
+# Comprehensive-summary prompt. Locked-in after the prompt-iteration in
+# summary_lab.py. The "ignore page furniture" clause is a backstop for
+# HTML sources where trafilatura sometimes pulls sidebar/related content
+# along with the article body.
+SUMMARIZE_PROMPT = (
+    "Write a comprehensive summary of this piece. The summary should be "
+    "detailed enough that a reader could use it in place of the original — "
+    "preserve specifics, examples, numbers, and quotes where they matter. "
+    "Do not compress aggressively.\n\n"
+    "The content may include extraneous page material — navigation, "
+    "sidebars, related-article links, footers, newsletter signups, or "
+    "unrelated headlines from elsewhere on the site. Ignore anything that "
+    "isn't part of the main piece itself."
+)
+
+# Source content cap. Gemini 2.5 Flash (1M ctx) and Anthropic models
+# (200k ctx) both comfortably handle this; raised from 30k after the
+# attribution_graphs paper demonstrated mid-paper truncation.
+INPUT_CHAR_CAP = 200_000
+
+# Default output token cap. Enough for a comprehensive summary of a 40-page
+# paper (which empirically lands ~5-7k visible tokens on R_comprehensive).
+DEFAULT_MAX_TOKENS = 8000
+
+
+def _is_transient_error(err: Exception) -> bool:
+    """Detect API errors worth retrying — 503, 429, 500, timeouts."""
+    msg = str(err).lower()
+    return any(s in msg for s in (
+        "503", "429", "500", "unavailable", "timeout", "temporarily",
+        "rate limit", "resource_exhausted",
+    ))
+
+
+def _with_retry(fn, max_attempts: int = 3, base_delay: float = 1.0):
+    """Run fn() with exponential backoff on transient errors."""
+    import time as _time
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == max_attempts - 1 or not _is_transient_error(e):
+                raise
+            delay = base_delay * (2 ** attempt)
+            print(f"    transient error (attempt {attempt + 1}/{max_attempts}): {e}; retrying in {delay:.1f}s")
+            _time.sleep(delay)
+
+
+def _summarize_gemini(prompt: str, model: str, max_tokens: int) -> Optional[str]:
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        print("    google-genai package not installed, skipping summarization")
+        return None
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("    GEMINI_API_KEY not set, skipping summarization")
+        return None
+
+    client = genai.Client(api_key=api_key)
+    # thinking_budget=0 disables Gemini 2.5's internal chain-of-thought, which
+    # otherwise silently consumes max_output_tokens before producing visible
+    # text. Summarization doesn't benefit from extended reasoning.
+    config = types.GenerateContentConfig(
+        max_output_tokens=max_tokens,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    )
+
+    def call():
+        resp = client.models.generate_content(model=model, contents=prompt, config=config)
+        return resp.text or None
+
+    try:
+        return _with_retry(call)
+    except Exception as e:
+        print(f"    Gemini summarization error: {e}")
+        return None
+
+
+def _summarize_anthropic(prompt: str, model: str, max_tokens: int) -> Optional[str]:
     try:
         from anthropic import Anthropic
     except ImportError:
@@ -328,45 +407,39 @@ def summarize(text: str, source_type: str = "rss", title: str = "",
         print("    ANTHROPIC_API_KEY not set, skipping summarization")
         return None
 
-    # Truncate to ~30k chars to stay within context limits
-    content = text[:30000]
+    client = Anthropic(api_key=api_key)
 
-    type_hint = ""
-    if source_type == "podcast":
-        type_hint = "This is a podcast transcript. Focus on the main arguments and insights from each speaker. Ignore filler, ads, and tangential small talk.\n\n"
-    elif source_type == "sitemap":
-        type_hint = "This is a company blog post. Focus on product announcements, technical capabilities, and strategic implications.\n\n"
-    elif source_type == "youtube":
-        type_hint = "This is a YouTube video transcript from auto-generated or manual captions. Focus on the speakers' main arguments and insights. Captions can have transcription errors and miss visual context — work from the textual content you have.\n\n"
-    elif source_type == "scholarly":
-        type_hint = "This is a scholarly paper abstract. Lead with the empirical finding and what it implies for practice — not the methodology. Focus on what the paper reveals about how AI changes work, decisions, controls, or outcomes for organizations and professionals.\n\n"
-
-    # Keep prompt in sync with workers/summarize-api/worker.js
-    prompt = (
-        "You are an expert analyst creating an intelligence briefing.\n\n"
-        "Produce a two-part summary:\n\n"
-        "1. HEADLINE: One or two punchy sentences — the \"so what?\" of this piece. "
-        "Make it concrete and specific, not generic. No bullet points, no bold, just a plain paragraph.\n\n"
-        "2. Then a line containing only --- (a horizontal rule).\n\n"
-        "3. DETAILS: 5-8 bullet points covering key facts, strategic implications, and actionable insights. "
-        "Use markdown bullet points (- **Bold label** explanation). Be specific and concise.\n\n"
-        "No introductory phrases, no section headings — just the headline paragraph, then ---, then the bullets.\n\n"
-        f"{type_hint}"
-        f"Title: {title}\n\n"
-        f"Content:\n{content}"
-    )
-
-    try:
-        client = Anthropic(api_key=api_key)
+    def call():
         resp = client.messages.create(
             model=model,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
         return resp.content[0].text
+
+    try:
+        return _with_retry(call)
     except Exception as e:
-        print(f"    Summarization error: {e}")
+        print(f"    Anthropic summarization error: {e}")
         return None
+
+
+def summarize(text: str, source_type: str = "rss", title: str = "",
+              model: str = "gemini-2.5-flash",
+              max_tokens: int = DEFAULT_MAX_TOKENS) -> Optional[str]:
+    """Summarize text. Dispatches to Gemini or Anthropic by model name prefix.
+
+    Returns the summary string on success, or None on failure. Callers should
+    pass None through to the DB so the re-summarize cron can pick it up later.
+    """
+    if not text:
+        return None
+    content = text[:INPUT_CHAR_CAP]
+    full_prompt = f"{SUMMARIZE_PROMPT}\n\nTitle: {title}\n\nContent:\n{content}"
+
+    if model.startswith("gemini"):
+        return _summarize_gemini(full_prompt, model, max_tokens)
+    return _summarize_anthropic(full_prompt, model, max_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +462,7 @@ def fetch_rss(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     lookback = datetime.now(timezone.utc) - timedelta(days=settings.get("lookback_days", 3))
     max_posts = settings.get("max_posts_per_source", 5)
     keywords = source.get("keywords")
-    model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    model = settings.get("summarization_model", "gemini-2.5-flash")
 
     # Parse and sort by date (newest first)
     entries = []
@@ -426,7 +499,7 @@ def fetch_rss(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             print(f"    Skipping — no substantial text extracted")
             continue
 
-        summary = summarize(text, source_type="rss", title=title, model=model)
+        summary = summarize(text, source_type="rss", title=title, model=model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
 
         articles.append({
             "title": title,
@@ -450,7 +523,7 @@ def fetch_sitemap(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     max_posts = settings.get("max_posts_per_source", 5)
     keywords = source.get("keywords")
     url_pattern = source.get("url_pattern")
-    model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    model = settings.get("summarization_model", "gemini-2.5-flash")
     lookback = datetime.now(timezone.utc) - timedelta(days=settings.get("lookback_days", 3))
 
     # Recursively parse sitemap
@@ -499,7 +572,7 @@ def fetch_sitemap(source: dict, seen_urls: set, settings: dict) -> list[dict]:
         title = page_url.rstrip("/").split("/")[-1].replace("-", " ").title()
 
         print(f"  [{source['id']}] {title[:60]}")
-        summary = summarize(text, source_type="sitemap", title=title, model=model)
+        summary = summarize(text, source_type="sitemap", title=title, model=model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
 
         articles.append({
             "title": title,
@@ -590,7 +663,7 @@ def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
         raise RuntimeError("yt-dlp not installed (pip install yt-dlp)")
 
     max_posts = settings.get("max_posts_per_source", 5)
-    model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    model = settings.get("summarization_model", "gemini-2.5-flash")
 
     ydl_opts = {**_yt_dlp_opts(), "extract_flat": "in_playlist", "playlistend": max_posts * 3}
 
@@ -623,7 +696,7 @@ def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             print(f"    Skipping — no captions available")
             continue
 
-        summary = summarize(transcript, source_type="youtube", title=title, model=model)
+        summary = summarize(transcript, source_type="youtube", title=title, model=model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
 
         articles.append({
             "title": title,
@@ -650,7 +723,7 @@ def fetch_podcast(source: dict, seen_urls: set, settings: dict) -> list[dict]:
 
     lookback = datetime.now(timezone.utc) - timedelta(days=settings.get("lookback_days", 3))
     max_posts = settings.get("max_posts_per_source", 5)
-    model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    model = settings.get("summarization_model", "gemini-2.5-flash")
 
     # Sort by date
     entries = []
@@ -687,7 +760,7 @@ def fetch_podcast(source: dict, seen_urls: set, settings: dict) -> list[dict]:
                 continue
             print(f"    Using episode description (no transcript)")
 
-        summary = summarize(transcript, source_type="podcast", title=title, model=model)
+        summary = summarize(transcript, source_type="podcast", title=title, model=model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
 
         articles.append({
             "title": title,
@@ -964,7 +1037,7 @@ def fetch_scholarly_authors(source: dict, seen_urls: set, settings: dict) -> lis
 
     lookback_days = source.get("lookback_days", 180)
     max_posts = source.get("max_posts", settings.get("max_posts_per_source", 25))
-    summarization_model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    summarization_model = settings.get("summarization_model", "gemini-2.5-flash")
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
@@ -1001,7 +1074,7 @@ def fetch_scholarly_authors(source: dict, seen_urls: set, settings: dict) -> lis
             continue
 
         print(f"  [{source['id']}] ✓ {author_name}: {title[:55]}")
-        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model)
+        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
         if summary:
             summary = f"_Watchlist author: **{author_name}**_\n\n{summary}"
 
@@ -1034,7 +1107,7 @@ def fetch_scholarly_rss(source: dict, seen_urls: set, settings: dict) -> list[di
     lookback_days = source.get("lookback_days", 30)
     max_posts = source.get("max_posts", settings.get("max_posts_per_source", 10))
     scoring_model = source.get("scoring_model") or settings.get("scoring_model", "claude-haiku-4-5-20251001")
-    summarization_model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    summarization_model = settings.get("summarization_model", "gemini-2.5-flash")
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
@@ -1090,7 +1163,7 @@ def fetch_scholarly_rss(source: dict, seen_urls: set, settings: dict) -> list[di
         if score < score_threshold:
             continue
 
-        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model)
+        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
         if summary:
             summary = f"_Mollick-likeness: {score}/20 — {reason}_\n\n{summary}"
 
@@ -1122,7 +1195,7 @@ def fetch_scholarly(source: dict, seen_urls: set, settings: dict) -> list[dict]:
     max_candidates   = source.get("max_candidates", 100)
     lookback_days    = source.get("lookback_days", 90)
     scoring_model    = source.get("scoring_model") or settings.get("scoring_model", "claude-haiku-4-5-20251001")
-    summarization_model = settings.get("summarization_model", "claude-sonnet-4-20250514")
+    summarization_model = settings.get("summarization_model", "gemini-2.5-flash")
     max_posts        = source.get("max_posts", settings.get("max_posts_per_source", 10))
 
     seed_ids = []
@@ -1184,7 +1257,7 @@ def fetch_scholarly(source: dict, seen_urls: set, settings: dict) -> list[dict]:
         if score < score_threshold:
             continue
 
-        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model)
+        summary = summarize(abstract, source_type="scholarly", title=title, model=summarization_model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
         if summary:
             summary = f"_Mollick-likeness: {score}/20 — {reason}_\n\n{summary}"
 

@@ -187,5 +187,14 @@ sources:
 settings:
   lookback_days: 3
   max_posts_per_source: 5
-  summarization_model: claude-sonnet-4-20250514
+  # Default summarizer. Gemini 2.5 Flash chosen after the summary_lab.py
+  # bake-off: ~8× cheaper than Sonnet 4.6 at comparable depth on the
+  # R_comprehensive prompt. Failures fall back to Sonnet via the
+  # resummarize_pending.py retry job (.github/workflows/resummarize.yaml).
+  summarization_model: gemini-2.5-flash
+  summarization_max_tokens: 8000
+  # Fallback used by resummarize_pending.py when Gemini stays unavailable.
+  summarization_fallback_model: claude-sonnet-4-6
+  # Mollick-likeness scoring for scholarly sources — small, cheap, used
+  # only as a gate before paying for summarization.
   scoring_model: claude-haiku-4-5-20251001

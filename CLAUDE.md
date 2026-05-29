@@ -1,58 +1,185 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
+
+> For *what we're building and why*, see [SPEC.md](SPEC.md). This file
+> covers *how the code is shaped* and *non-obvious gotchas* — engineering
+> context that doesn't belong in a product spec.
 
 # Sourcerer
 
-Headless content database. GitHub Actions cron fetches sources in `feeds.yaml`, summarizes via Claude, upserts into Supabase. The pipeline is the source of truth; any consumer (iOS app, MCP servers, dashboards) reads from Supabase.
+Headless content database. GitHub Actions cron fetches sources in
+`feeds.yaml`, summarizes via Claude, upserts into Supabase. The pipeline
+is the source of truth; any consumer (iOS app, MCP servers, dashboards)
+reads from Supabase.
 
-Pipeline shape: `feeds.yaml → pull.py → fetchers.py (FETCHERS dispatch + summarize via Claude) → Supabase.articles`. `pull.py` is the thin orchestrator that loads `feeds.yaml`, fetches the per-source `seen_urls` set from Supabase, dispatches by `type`, and upserts results with a `source_runs` row per source.
+Pipeline shape: `feeds.yaml → pull.py → fetchers.py (FETCHERS dispatch
++ summarize via Claude) → Supabase.articles`. `pull.py` is the thin
+orchestrator that loads `feeds.yaml`, fetches the per-source `seen_urls`
+set from Supabase, dispatches by `type`, and upserts results with a
+`source_runs` row per source.
 
 ## How runs happen
 
-- **Production**: GitHub Actions cron (`.github/workflows/daily.yaml`). Secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) live in repo settings.
-- **Local**: `python pull.py` after `pip install -r requirements.txt`. Reads `.env` via `python-dotenv`. `.env` is gitignored — never commit it.
+- **Production**: GitHub Actions cron (`.github/workflows/daily.yaml`).
+  Secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY`,
+  `OPENAI_API_KEY`) live in repo settings.
+- **Local**: `python pull.py` after `pip install -r requirements.txt`.
+  Reads `.env` via `python-dotenv`. `.env` is gitignored — never commit it.
 
 ## Non-obvious things
 
-- **Substack proxy**: `substack-proxy.rozenborg.workers.dev` is our own Cloudflare worker, not a third-party service. Substack/Cloudflare-protected feeds must be wrapped with it (see existing entries in `feeds.yaml`).
-- **Sibling worker**: a comment in `summarize()` at [fetchers.py:344](fetchers.py#L344) references `workers/summarize-api/worker.js`. That worker lives in a separate repo (not in this tree). The summarization prompt is duplicated between `summarize()` here and the worker — keep them in sync if either changes.
-- **Supabase URL**: it's `https://<project-id>.supabase.co` (API endpoint), **not** `https://supabase.com/dashboard/project/<project-id>` (dashboard UI). Easy mistake when copying from the browser.
+- **Substack proxy**: `substack-proxy.rozenborg.workers.dev` is our own
+  Cloudflare worker, not a third-party service. Substack/Cloudflare-protected
+  feeds must be wrapped with it (see existing entries in `feeds.yaml`).
+- **Sibling worker**: a comment in `summarize()` at
+  [fetchers.py:344](fetchers.py#L344) references
+  `workers/summarize-api/worker.js`. That worker lives in a separate repo
+  (not in this tree). The summarization prompt is duplicated between
+  `summarize()` here and the worker — keep them in sync if either changes.
+- **Supabase URL**: it's `https://<project-id>.supabase.co` (API endpoint),
+  **not** `https://supabase.com/dashboard/project/<project-id>` (dashboard
+  UI). Easy mistake when copying from the browser.
 
 ## Code style
 
-Plain functions, no classes, no framework. Seven fetcher types — `fetch_rss`, `fetch_sitemap`, `fetch_podcast`, `fetch_youtube`, `fetch_scholarly`, `fetch_scholarly_rss`, `fetch_scholarly_authors` — dispatched via the `FETCHERS` dict in `pull.py`. The simplicity is intentional — don't refactor toward abstractions. New fetchers should follow the same shape: `fetch_X(source, seen_urls, settings) -> list[article_dict]`.
+Plain functions, no classes, no framework. Seven fetcher types —
+`fetch_rss`, `fetch_sitemap`, `fetch_podcast`, `fetch_youtube`,
+`fetch_scholarly`, `fetch_scholarly_rss`, `fetch_scholarly_authors` —
+dispatched via the `FETCHERS` dict in `pull.py`. The simplicity is
+intentional — don't refactor toward abstractions. New fetchers should
+follow the same shape: `fetch_X(source, seen_urls, settings) -> list[article_dict]`.
 
-The `youtube` fetcher uses yt-dlp for everything — listing channel videos AND discovering caption track URLs. The `android` player_client is pinned because the `web` client returns empty subtitle dicts in CI, and `youtube-transcript-api` is IP-blocked from datacenter ranges (verified failing on GitHub Actions). Captions come back as json3 fetched directly via httpx. Videos without captions are skipped — Whisper fallback is on the wishlist. Lookback filtering doesn't apply to YouTube (flat extraction lacks per-video timestamps); `max_posts_per_source` and seen-URL dedup are the limiters. **Cookies caveat**: the `YOUTUBE_COOKIES` GitHub secret expires fast under datacenter-IP access patterns — typically every 1-3 days. When YouTube ingest stops working, re-export cookies and update the secret (or move to a self-hosted runner with a residential IP, which makes the problem permanent).
+## Fetcher-specific gotchas
 
-The `scholarly` fetcher uses Semantic Scholar's recommendation API seeded with curated "taste" papers, then runs each candidate through a Claude Haiku call that scores Mollick-likeness 0-20 against the rubric inlined in `MOLLICK_RUBRIC_PROMPT`. Only papers ≥ `score_threshold` (default 12) get summarized via Sonnet and ingested. Seeds load from a pre-resolved JSONL bundle (`reference_material/ethan_mollick_seed_corpus_ids_bundle/...jsonl`) which has ~100 verified S2 paperIds — this dodges S2's aggressive title-search rate limit. Inline `seed_papers` in `feeds.yaml` is supported as overflow for new seeds added outside the bundle.
+### YouTube
 
-The `scholarly_rss` fetcher applies the same Mollick-likeness rubric to academic RSS feeds — currently NBER's new-papers feed and arXiv (`cs.HC`, `cs.CY`). The cs.AI firehose is intentionally excluded (~500 entries/day = expensive scoring with low yield). SSRN was the original target here but Elsevier deprecated their public eJournal RSS after acquiring SSRN; the site is anti-bot and that ecosystem is genuinely unreachable without scraping.
+The `youtube` fetcher uses yt-dlp for everything — listing channel videos
+AND discovering caption track URLs. The `android` player_client is pinned
+because the `web` client returns empty subtitle dicts in CI, and
+`youtube-transcript-api` is IP-blocked from datacenter ranges (verified
+failing on GitHub Actions). Captions come back as json3 fetched directly
+via httpx. Videos without captions are skipped — Whisper fallback is a
+known gap. Lookback filtering doesn't apply to YouTube (flat extraction
+lacks per-video timestamps); `max_posts_per_source` and seen-URL dedup
+are the limiters.
 
-The `scholarly_authors` fetcher pulls **every** recent paper by named researchers via S2's author/papers endpoint — no scoring filter, full coverage. Watchlist authors come from §8 of the Mollick reference doc. **Known limitation**: name collisions cause false-positive ingests. Example: "Sida Peng" matches both a Microsoft developer-productivity researcher AND a separate ML/computer-vision researcher; the "pick most prolific" heuristic chose the wrong one in our first run. Fix when it bites: pin the right `authorId` directly in `feeds.yaml` (S2 endpoint accepts authorId in lieu of name).
+**Cookies (recurring tax).** `YOUTUBE_COOKIES` GitHub secret expires
+every 1–3 days under datacenter-IP access. When YouTube ingest stops
+working, re-export cookies and `gh secret set YOUTUBE_COOKIES < cookies.txt`.
+Permanent fix: self-hosted runner with a residential IP.
+
+### Scholarly
+
+The `scholarly` fetcher uses Semantic Scholar's recommendation API seeded
+with curated "taste" papers, then runs each candidate through a Claude
+Haiku call that scores Mollick-likeness 0–20 against the rubric inlined
+in `MOLLICK_RUBRIC_PROMPT`. Only papers ≥ `score_threshold` (default 12)
+get summarized via Sonnet and ingested. Seeds load from a pre-resolved
+JSONL bundle (`reference_material/ethan_mollick_seed_corpus_ids_bundle/...jsonl`)
+which has ~100 verified S2 paperIds — this dodges S2's aggressive
+title-search rate limit. Inline `seed_papers` in `feeds.yaml` is supported
+as overflow for new seeds added outside the bundle.
+
+The `scholarly_rss` fetcher applies the same Mollick-likeness rubric to
+academic RSS feeds — currently NBER's new-papers feed and arXiv (`cs.HC`,
+`cs.CY`). The cs.AI firehose is intentionally excluded (~500 entries/day
+= expensive scoring with low yield). SSRN was the original target but
+Elsevier deprecated their public eJournal RSS after acquiring SSRN; that
+ecosystem is genuinely unreachable without scraping.
+
+The `scholarly_authors` fetcher pulls **every** recent paper by named
+researchers via S2's author/papers endpoint — no scoring filter, full
+coverage. Watchlist authors come from §8 of the Mollick reference doc.
+
+**Known operational issue — name collisions.** "Sida Peng" matches both
+a Microsoft developer-productivity researcher AND a separate ML/CV
+researcher; the "pick most prolific" heuristic chose the wrong one in
+our first run. Fix when it bites: pin the right `authorId` directly in
+`feeds.yaml` (S2 endpoint accepts authorId in lieu of name).
 
 ## Adding sources
 
-`python add_source.py <url> [--name "..."] [--id slug] [--keywords AI LLM] [--dry-run]` probes a URL, detects the right fetcher type (rss/podcast/youtube/sitemap), runs a lightweight preview (no Claude/Whisper calls), and appends to `feeds.yaml`. Handles RSS auto-discovery, Apple Podcasts (via iTunes Search API), YouTube channels, and Substack proxy-wrapping automatically. **Does not yet support** the scholarly source types — those are configured by editing `feeds.yaml` directly.
+`python add_source.py <url> [--name "..."] [--id slug] [--keywords AI LLM] [--dry-run]`
+probes a URL, detects the right fetcher type (rss/podcast/youtube/sitemap),
+runs a lightweight preview (no Claude/Whisper calls), and appends to
+`feeds.yaml`. Handles RSS auto-discovery, Apple Podcasts (via iTunes
+Search API), YouTube channels, and Substack proxy-wrapping automatically.
+**Does not yet support** the scholarly source types — those are configured
+by editing `feeds.yaml` directly.
 
 ## Reference material
 
-The `reference_material/` directory holds context docs that shape how Sourcerer filters scholarly content:
+The `reference_material/` directory holds context docs that shape how
+Sourcerer filters scholarly content:
 
-- `mollick_style_ai_research_monitoring_reference.md` — the 0-20 Mollick-likeness scoring rubric (§9.1) inlined in `MOLLICK_RUBRIC_PROMPT`, plus topical lane definitions
-- `ethan_mollick_semantic_scholar_seed_corpus.md` — the deeper reference with §6 thematic clusters, §7 highest-value 40 list, §8 author watchlist, §11 alternate scoring rubric
-- `ethan_mollick_seed_corpus_ids_bundle/` — the pre-resolved canonical IDs bundle the `scholarly` fetcher loads via `seed_jsonl`. Contains a CSV/MD/JSONL trio plus `semantic_scholar_bulk_resolver.py` for resolving the remaining UNRESOLVED rows.
+- `mollick_style_ai_research_monitoring_reference.md` — the 0–20
+  Mollick-likeness scoring rubric (§9.1) inlined in
+  `MOLLICK_RUBRIC_PROMPT`, plus topical lane definitions.
+- `ethan_mollick_semantic_scholar_seed_corpus.md` — the deeper reference
+  with §6 thematic clusters, §7 highest-value 40 list, §8 author
+  watchlist, §11 alternate scoring rubric.
+- `ethan_mollick_seed_corpus_ids_bundle/` — the pre-resolved canonical
+  IDs bundle the `scholarly` fetcher loads via `seed_jsonl`. Contains a
+  CSV/MD/JSONL trio plus `semantic_scholar_bulk_resolver.py` for
+  resolving the remaining UNRESOLVED rows.
 
-## iOS app
+# iOS app
 
-The `ios/` directory holds a SwiftUI client (`SourcererApp`) that reads from the same Supabase project the pipeline writes to and layers per-user pass/star/save on top. It currently lives in this repo while being stabilized and will be extracted to `sourcerer-ios` later. Setup, project generation (`xcodegen` from `project.yml`), and Supabase migration steps (`ios/supabase/migrations/`) live in [ios/README.md](ios/README.md). The pipeline does not depend on the iOS app — pipeline-only changes should not touch `ios/`.
+The `ios/` directory holds a SwiftUI client (`SourcererApp`) that reads
+from the same Supabase project the pipeline writes to and layers per-user
+pass/spark/save on top. It currently lives in this repo while being
+stabilized and will be extracted to `sourcerer-ios` later. Setup, project
+generation (`xcodegen` from `project.yml`), and Supabase migration steps
+(`ios/supabase/migrations/`) live in [ios/README.md](ios/README.md). The
+pipeline does not depend on the iOS app — pipeline-only changes should
+not touch `ios/`.
 
-Note: the canonical pipeline schema is `schema.sql` at the repo root (`articles`, `source_runs`, `source_health` view). `ios/supabase/migrations/` is additive user-state on top of that.
+The canonical pipeline schema is `schema.sql` at the repo root
+(`articles`, `source_runs`, `source_health` view).
+`ios/supabase/migrations/` is additive user-state on top of that.
 
-## Learnings log
+## App shape (post-rebuild)
 
-[LEARNINGS.md](LEARNINGS.md) is a running log of tool quirks, setup gotchas, and debug wins discovered while building. Check it before troubleshooting — same obstacle may already be solved. Append a tight entry (1–3 lines, dated) when a new obstacle is overcome; graduate entries into this file when they become permanent project knowledge.
+`@main SourcererApp` → `RootView` → either `AuthView` or `RootTabView`
+(5 tabs: Today / Tomorrow / Deck / Brief / Me). Each tab is a `*View.swift`
+under `Views/<TabName>/`. `AppEnvironment` is the DI container;
+`ArticleRepository`, `InteractionsRepository`, `AuthService` are the
+services.
 
-## Wishlist
+Design system lives under `DesignSystem/` — `SourcererTheme.swift` for
+typography/color, `Components/` for reusable UI (DeckCard, ListRowCard,
+OrbView, TickerBar, etc.). If a visual bug shows up in multiple tabs,
+fix it at the component level rather than tab-by-tab.
 
-Ideas and unfinished work live in [WISHLIST.md](WISHLIST.md). Check items off there as they ship.
+## iOS-specific gotchas
+
+- **Launch-arg debug preview.** To inspect SwiftUI screens before auth
+  is wired, state is gated on `ProcessInfo.processInfo.arguments` inside
+  `#if DEBUG`. Launch via
+  `xcrun simctl launch <device> com.rozenborg.sourcerer --preview --tab=N`.
+  Strips cleanly in Release. Already wired in `SourcererApp.swift` and
+  `RootTabView.initialTab()`.
+
+- **Snapshot loops** via `xcrun simctl io <device> screenshot path.png`
+  beat opening the Simulator GUI for each tab. Combine with
+  `xcrun simctl terminate` + relaunch with different launch args to
+  capture every screen state. Default iPhone names drift across Xcode
+  releases — `xcrun simctl list devices` to find the current name (in
+  iOS 26.x it's "iPhone 17 Pro").
+
+- **MarkdownUI text color.** `.markdownTheme(.basic)` doesn't set text
+  color — it inherits the SwiftUI environment, which on our paper
+  palette can resolve to white-on-cream (unreadable). SwiftUI's
+  `.foregroundStyle(...)` modifier does **not** penetrate MarkdownUI's
+  internal text rendering. Use the library's own builder API:
+  `.markdownTextStyle { ForegroundColor(Theme.Color.ink) }`. The
+  `ForegroundColor`, `FontFamily`, `FontSize`, etc. builders all exist
+  in the installed version (`Sources/MarkdownUI/Theme/TextStyle/Styles/`).
+  Used in `ArticleDetailView`.
+
+- **`PRODUCT_SPEC` references in view comments** point to
+  [SPEC.md](SPEC.md). The numbered sections in code comments (§1, §3,
+  §5, §6, Phase 2, Phase 4) predate the spec being written and may not
+  line up perfectly with current SPEC.md sections — treat them as
+  historical intent markers, not authoritative section refs.

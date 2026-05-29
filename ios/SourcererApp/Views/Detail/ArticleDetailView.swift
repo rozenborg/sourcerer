@@ -56,6 +56,18 @@ struct ArticleDetailView: View {
                     if !parsed.body.isEmpty {
                         Markdown(parsed.body)
                             .markdownTheme(.basic)
+                            .markdownTextStyle {
+                                ForegroundColor(Theme.Color.ink)
+                            }
+                            .tint(Theme.Color.accent)
+                    }
+
+                    if let score = parsed.mollickScore {
+                        Text("MOLLICK-LIKENESS · \(score)/20")
+                            .font(Theme.Typography.meta(9, weight: .bold))
+                            .tracking(1)
+                            .foregroundStyle(Theme.Color.stone300)
+                            .padding(.top, 4)
                     }
 
                     actionRow

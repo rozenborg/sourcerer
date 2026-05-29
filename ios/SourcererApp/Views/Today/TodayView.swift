@@ -14,6 +14,7 @@ struct TodayView: View {
     @State private var ratingArticle: Article? = nil
     @State private var loadError: String?
     @State private var isLoading = false
+    @State private var path: [Article] = []
 
     /// Bounded deck size — design says ~18 (PRODUCT_SPEC §1).
     private let deckCap = 18
@@ -21,31 +22,37 @@ struct TodayView: View {
     private var deckCount: Int { min(articles.count, deckCap) }
 
     var body: some View {
-        ZStack {
-            PageBackground(atmosphere: .calm)
-            VStack(spacing: 0) {
-                TickerBar(items: tickerItems)
-                StreakRibbon(streak: streakEstimate, cleared: clearedIds.count, total: deckCount)
-                header
-                    .padding(.horizontal, 22)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
+        NavigationStack(path: $path) {
+            ZStack {
+                PageBackground(atmosphere: .calm)
+                VStack(spacing: 0) {
+                    TickerBar(items: tickerItems)
+                    StreakRibbon(streak: streakEstimate, cleared: clearedIds.count, total: deckCount)
+                    header
+                        .padding(.horizontal, 22)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
 
-                content
-            }
+                    content
+                }
 
-            if isLoading && articles.isEmpty {
-                ProgressView().tint(Theme.Color.accent)
+                if isLoading && articles.isEmpty {
+                    ProgressView().tint(Theme.Color.accent)
+                }
             }
-        }
-        .task { if articles.isEmpty { await refresh() } }
-        .refreshable { await refresh() }
-        .sheet(item: $ratingArticle) { article in
-            RatingSheet(article: article) { sparks, note in
-                Task { await applyRating(article: article, sparks: sparks, note: note) }
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: Article.self) { article in
+                ArticleDetailView(article: article)
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .task { if articles.isEmpty { await refresh() } }
+            .refreshable { await refresh() }
+            .sheet(item: $ratingArticle) { article in
+                RatingSheet(article: article) { sparks, note in
+                    Task { await applyRating(article: article, sparks: sparks, note: note) }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -73,14 +80,13 @@ struct TodayView: View {
                         onSpark: { article in
                             ratingArticle = article
                         },
-                        onSave: { article in Task { await save(article) } }
+                        onSave: { article in Task { await save(article) } },
+                        onOpen: { article in path.append(article) }
                     )
         case .list:  TodayListMode(
                         articles: deckArticles,
                         statusFor: status(for:),
-                        onTap: { article in
-                            ratingArticle = article
-                        }
+                        onTap: { article in path.append(article) }
                     )
         }
     }

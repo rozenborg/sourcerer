@@ -13,6 +13,7 @@ struct DeckPileView: View {
     let onPass: (Article) -> Void
     let onSpark: (Article) -> Void
     let onSave: (Article) -> Void
+    let onOpen: (Article) -> Void
 
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
@@ -57,6 +58,10 @@ struct DeckPileView: View {
                 .opacity(opacity(forDepth: depth))
                 .overlay(swipeIntentOverlay(article: article, isTop: isTop, dragNorm: dragNorm))
                 .zIndex(Double(visible.count - depth))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if isTop { onOpen(article) }
+                }
                 .gesture(
                     isTop ?
                     DragGesture()
@@ -270,8 +275,8 @@ struct DeckPileView: View {
             Spacer()
 
             HStack(spacing: 6) {
-                Image(systemName: "arrow.up")
-                Text("deep").tracking(0.6)
+                Image(systemName: "hand.tap")
+                Text("tap · read").tracking(0.6)
             }
             .font(Theme.Typography.meta(10, weight: .bold))
             .foregroundStyle(Theme.Color.accent)
