@@ -9,34 +9,60 @@ Guidance for Claude Code when working in this repository.
 # Sourcerer
 
 Headless content database. GitHub Actions cron fetches sources in
-`feeds.yaml`, summarizes via Claude, upserts into Supabase. The pipeline
-is the source of truth; any consumer (iOS app, MCP servers, dashboards)
-reads from Supabase.
+`feeds.yaml`, summarizes via Gemini 2.5 Flash (with a Sonnet fallback
+for transient failures), upserts into Supabase. The pipeline is the
+source of truth; any consumer (iOS app, MCP servers, dashboards) reads
+from Supabase.
 
 Pipeline shape: `feeds.yaml → pull.py → fetchers.py (FETCHERS dispatch
-+ summarize via Claude) → Supabase.articles`. `pull.py` is the thin
++ summarize via Gemini) → Supabase.articles`. `pull.py` is the thin
 orchestrator that loads `feeds.yaml`, fetches the per-source `seen_urls`
 set from Supabase, dispatches by `type`, and upserts results with a
 `source_runs` row per source.
 
 ## How runs happen
 
-- **Production**: GitHub Actions cron (`.github/workflows/daily.yaml`).
-  Secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY`,
-  `OPENAI_API_KEY`) live in repo settings.
+- **Production**: two GitHub Actions crons:
+  - `.github/workflows/daily.yaml` — 08:00 UTC, the main ingest.
+  - `.github/workflows/resummarize.yaml` — 09:00 UTC, picks up
+    `summary IS NULL` rows from the morning run and retries (Gemini →
+    Sonnet fallback). Decoupled so a transient Gemini outage during
+    ingest doesn't cost the article.
+  Secrets (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`) live in repo settings.
 - **Local**: `python pull.py` after `pip install -r requirements.txt`.
-  Reads `.env` via `python-dotenv`. `.env` is gitignored — never commit it.
+  Reads `.env` via `python-dotenv`. `.env` is gitignored — never commit
+  it. To retry NULL summaries locally: `python resummarize_pending.py`.
 
 ## Non-obvious things
 
 - **Substack proxy**: `substack-proxy.rozenborg.workers.dev` is our own
   Cloudflare worker, not a third-party service. Substack/Cloudflare-protected
   feeds must be wrapped with it (see existing entries in `feeds.yaml`).
-- **Sibling worker**: a comment in `summarize()` at
-  [fetchers.py:344](fetchers.py#L344) references
-  `workers/summarize-api/worker.js`. That worker lives in a separate repo
-  (not in this tree). The summarization prompt is duplicated between
-  `summarize()` here and the worker — keep them in sync if either changes.
+- **Sibling worker (now drifted)**: a sibling repo houses
+  `workers/summarize-api/worker.js` which historically duplicated the
+  in-repo `summarize()` prompt. As of the Gemini migration, the in-repo
+  prompt is completely different (single-sentence "Capture the full
+  substance of this piece..." → Gemini Flash) while the worker still
+  runs the old Sonnet-with-HEADLINE-and-bullets shape. If the worker is
+  still in active use anywhere, it's producing the legacy format.
+- **Summarizer dispatch**: `summarize()` in `fetchers.py` routes by model
+  name prefix — `gemini-*` → Gemini API, anything else → Anthropic API.
+  This is intentional so `summarization_model` in `feeds.yaml` (and the
+  `summarization_fallback_model` used by `resummarize_pending.py`) can
+  cross providers without a separate `provider:` setting.
+- **Gemini 2.5 thinking is OFF for summarization** (`thinking_budget=0`).
+  With the default dynamic budget, Gemini silently spends most of
+  `max_output_tokens` on internal reasoning before producing visible
+  text — yielding 100-token summaries on a 3000-token budget. Bug
+  reproduced consistently on the attention.pdf test case during the
+  prompt bake-off. Not relevant for summarization quality; the cost is
+  real reliability.
+- **Supabase view default is unsafe**: Postgres views default to running
+  with the *creator's* permissions, bypassing RLS. Supabase Advisor
+  flags this as "Security Definer View". Always add
+  `with (security_invoker = true)` when creating a view. Example in
+  `ios/supabase/migrations/20260528000000_feed_articles_hide_null_summary.sql`.
 - **Supabase URL**: it's `https://<project-id>.supabase.co` (API endpoint),
   **not** `https://supabase.com/dashboard/project/<project-id>` (dashboard
   UI). Easy mistake when copying from the browser.

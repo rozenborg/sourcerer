@@ -23,40 +23,68 @@ should match what's here; if implementation drifts, update the spec.
 ## Source ingestion
 
 **Vision.** A headless content database. Once a source is in `feeds.yaml`,
-the daily cron fetches it, summarizes via Claude, and upserts into
-Supabase. Any consumer (iOS, MCP, dashboards) reads from there. Plain
-functions, no classes, no framework — the simplicity is intentional.
+the daily cron fetches it, summarizes via Gemini Flash (with a Sonnet
+fallback for transient failures), and upserts into Supabase. Any consumer
+(iOS, MCP, dashboards) reads from there. Plain functions, no classes,
+no framework — the simplicity is intentional.
 
 **Today.**
 - `[delight]` Seven fetcher types: `fetch_rss`, `fetch_sitemap`,
   `fetch_podcast`, `fetch_youtube`, `fetch_scholarly`,
   `fetch_scholarly_rss`, `fetch_scholarly_authors`. Dispatched via the
   `FETCHERS` dict in [pull.py](pull.py).
-- `[delight]` Per-source `seen_urls` dedup before paying for Claude.
+- `[delight]` Per-source `seen_urls` dedup before paying for the LLM.
 - `[delight]` `source_runs` row written per source per run; `source_health`
   view shows latest run per source.
-- `[ok]` GitHub Actions cron at 08:00 UTC daily
-  ([.github/workflows/daily.yaml](.github/workflows/daily.yaml)).
+- `[delight]` Comprehensive single-sentence prompt locked in after a
+  bake-off across Haiku 4.5, Sonnet 4.6, Gemini 2.5 Flash (thinking on/
+  off), and Flash-Lite. Gemini Flash chosen on cost-quality (~8× cheaper
+  than Sonnet at comparable depth). `thinking_budget=0` to avoid
+  silently consuming `max_output_tokens` on reasoning.
+- `[delight]` Two-cron retry pattern for transient Gemini outages:
+  - `daily.yaml` at 08:00 UTC inserts `summary IS NULL` on failure
+    (no in-run retry; faster overall ingest).
+  - `resummarize.yaml` at 09:00 UTC runs `resummarize_pending.py`,
+    re-extracts via trafilatura, tries Gemini → falls back to Sonnet.
+  - iOS `feed_articles` view hides NULL summaries so users never see
+    half-empty cards while items are pending.
 - `[ok]` Substack/CF-protected feeds wrapped via own Cloudflare worker
   (`substack-proxy.rozenborg.workers.dev`).
 - `[bug]` **YouTube cookies expire every 1–3 days** under datacenter-IP
   access. When YouTube ingest stops working, `YOUTUBE_COOKIES` GitHub
   secret needs re-export. See CLAUDE.md for the runbook.
-- `[bug]` **Summarization prompt duplicated** between `summarize()` in
-  [fetchers.py:344](fetchers.py#L344) and `workers/summarize-api/worker.js`
-  in the sibling worker repo. Easy to drift.
+- `[bug]` **Sibling worker has drifted**. `workers/summarize-api/worker.js`
+  (in a separate repo) historically duplicated the in-repo prompt. The
+  in-repo prompt is now completely different (comprehensive single-
+  sentence → Gemini Flash); the worker still runs the legacy
+  Sonnet-with-HEADLINE-and-bullets shape. If the worker is in active use
+  anywhere, it's producing the old format. Sync or retire it.
+- `[bug]` **Resummarization loses Mollick rationale**. Scholarly fetchers
+  prepend `_Mollick-likeness: NN/20 — reason_` to the summary at ingest
+  time. When the resummarize cron regenerates a summary, that prefix is
+  lost (we don't store score/reason as separate columns). Acceptable for
+  now since (a) ParsedSummary in iOS already strips the prefix at render,
+  and (b) the iOS UI doesn't use the rationale today.
+- `[bug]` **Podcast / YouTube can't be re-summarized**. The retry cron
+  uses trafilatura on the article URL, which doesn't work for podcast
+  audio or YouTube videos (those need transcript regeneration). If
+  Gemini fails on a podcast/youtube article, it stays NULL until the
+  next daily run picks it up via dedup pressure.
 
 **Gaps.**
 - Whisper fallback for YouTube videos with captions disabled.
 - Podcast transcript routing — check shownotes for transcripts before
   downloading audio.
+- Transcript-source re-summarization (podcast/youtube) for the retry job.
+- Storing Mollick score + reason as columns so they survive re-summarization
+  and become available for ranking/display.
 
 **Disposition.**
 - Cookie refresh is the recurring tax — move to a self-hosted runner with
   a residential IP would kill the problem permanently. Until then, keep
   it manual.
-- Prompt duplication: either extract to a shared file (risks coupling two
-  repos) or accept the drift and add a test that diffs them. Defer.
+- Sibling worker drift: either sync the new prompt + Gemini call to the
+  worker, or formally retire it. Defer.
 
 ## Adding sources
 
