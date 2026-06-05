@@ -43,7 +43,7 @@ struct TomorrowView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    sectionHeader("✓ from you · \(saved.count) saved", color: Theme.Color.sage)
+                    sectionHeader("✓ your dive list · \(saved.count)", color: Theme.Color.sage)
                         .padding(.horizontal, 22)
                         .padding(.top, 18)
                         .padding(.bottom, 10)
@@ -103,7 +103,7 @@ struct TomorrowView: View {
             Image(systemName: "clock")
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.Color.inkSoft)
-            Text("your saves + items Sourcerer is watching · final pick at 06:30")
+            Text("your dive list + items Sourcerer is watching · final pick at 06:30")
                 .font(Theme.Typography.meta(10))
                 .tracking(0.4)
                 .foregroundStyle(Theme.Color.inkSoft)
@@ -122,7 +122,7 @@ struct TomorrowView: View {
     }
 
     private var emptyState: some View {
-        Text("Save a card today and it'll appear here, staged with two follow-ups Sourcerer picks for you.")
+        Text("Swipe a card up to dive into it later and it'll appear here, staged with two follow-ups Sourcerer picks for you.")
             .font(Theme.Typography.serif(14).italic())
             .foregroundStyle(Theme.Color.inkSoft)
             .multilineTextAlignment(.leading)
@@ -162,7 +162,7 @@ struct TomorrowView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            saved = try await env.articles.listSaved(limit: 50).map { $0.0 }
+            saved = try await env.articles.listStarred(limit: 50).map { $0.0 }
             loadError = nil
         } catch {
             loadError = error.localizedDescription

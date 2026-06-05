@@ -8,9 +8,19 @@ enum InteractionAction: String {
 }
 
 protocol InteractionsRepository {
-    func setAction(_ action: InteractionAction, articleId: Int64) async throws
+    /// Set an action's timestamp. `meta` is merged into the row's `meta` jsonb
+    /// (e.g. a light up/down rating from a left/right swipe, or sparks + note
+    /// from the rating sheet). Pass nil to leave existing meta untouched.
+    func setAction(_ action: InteractionAction, articleId: Int64, meta: [String: String]?) async throws
     func clearAction(_ action: InteractionAction, articleId: Int64) async throws
     func interaction(for articleId: Int64) async throws -> ArticleInteraction?
+}
+
+extension InteractionsRepository {
+    /// Convenience for callers that don't attach rating metadata.
+    func setAction(_ action: InteractionAction, articleId: Int64) async throws {
+        try await setAction(action, articleId: articleId, meta: nil)
+    }
 }
 
 final class SupabaseInteractionsRepository: InteractionsRepository {
@@ -22,25 +32,30 @@ final class SupabaseInteractionsRepository: InteractionsRepository {
         self.userId = userId
     }
 
-    func setAction(_ action: InteractionAction, articleId: Int64) async throws {
+    func setAction(_ action: InteractionAction, articleId: Int64, meta: [String: String]?) async throws {
         guard let uid = userId() else { throw AuthRequired() }
         let now = ISO8601DateFormatter().string(from: Date())
 
         // Upsert: insert if missing, update the targeted timestamp if present.
         // We send the full row so the upsert can succeed on first action.
+        // Optional fields encode via encodeIfPresent — a nil here is omitted
+        // from the payload, so PostgREST leaves that column unchanged (and
+        // `meta` keeps its '{}' default on first insert).
         struct Row: Encodable {
             let user_id: UUID
             let article_id: Int64
             let passed_at: String?
             let starred_at: String?
             let saved_at: String?
+            let meta: [String: String]?
         }
         let row = Row(
             user_id: uid,
             article_id: articleId,
             passed_at:  action == .pass ? now : nil,
             starred_at: action == .star ? now : nil,
-            saved_at:   action == .save ? now : nil
+            saved_at:   action == .save ? now : nil,
+            meta: meta
         )
         try await client
             .from("article_interactions")

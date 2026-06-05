@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Today's deck — the daily ritual. DECK and LIST are two views of the same
-/// bounded deck (PRODUCT_SPEC §1). Toggle in the header.
+/// deck (PRODUCT_SPEC §1). Toggle in the header.
 struct TodayView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(AuthService.self) private var auth
@@ -9,17 +9,19 @@ struct TodayView: View {
     @State private var mode: HomeMode = TodayView.initialMode()
     @State private var articles: [Article] = []
     @State private var clearedIds: Set<Int64> = []
-    @State private var sparkedIds: Set<Int64> = []
-    @State private var savedIds: Set<Int64> = []
+    @State private var divedIds: Set<Int64> = []
     @State private var ratingArticle: Article? = nil
     @State private var loadError: String?
     @State private var isLoading = false
     @State private var path: [Article] = []
 
-    /// Bounded deck size — design says ~18 (PRODUCT_SPEC §1).
-    private let deckCap = 18
+    /// How many unseen articles to pull. No deck cap anymore — we show the
+    /// whole day's queue and the real count (the user wants to see what's
+    /// left to get through). This is a generous ceiling, not a UX cap.
+    private let fetchLimit = 250
 
-    private var deckCount: Int { min(articles.count, deckCap) }
+    /// Real total — every unseen card, not a bounded slice.
+    private var total: Int { articles.count }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -27,7 +29,7 @@ struct TodayView: View {
                 PageBackground(atmosphere: .calm)
                 VStack(spacing: 0) {
                     TickerBar(items: tickerItems)
-                    StreakRibbon(streak: streakEstimate, cleared: clearedIds.count, total: deckCount)
+                    StreakRibbon(streak: streakEstimate, cleared: clearedIds.count, total: total)
                     header
                         .padding(.horizontal, 22)
                         .padding(.top, 14)
@@ -60,7 +62,7 @@ struct TodayView: View {
 
     private var header: some View {
         HStack(alignment: .lastTextBaseline) {
-            PageMasthead(title: "today's deck", dayOfWeek: nil, inboundCount: articles.count)
+            PageMasthead(title: "today's deck", dayOfWeek: nil, inboundCount: total)
             Spacer()
             ModeToggle(mode: $mode)
         }
@@ -73,14 +75,12 @@ struct TodayView: View {
         switch mode {
         case .deck:  DeckPileView(
                         articles: visibleDeckArticles,
-                        sparkedIds: sparkedIds,
-                        savedIds: savedIds,
-                        total: deckCount,
-                        onPass: { article in Task { await pass(article) } },
-                        onSpark: { article in
-                            ratingArticle = article
-                        },
-                        onSave: { article in Task { await save(article) } },
+                        divedIds: divedIds,
+                        total: total,
+                        onPass: { article in Task { await pass(article, liked: false) } },
+                        onLike: { article in Task { await pass(article, liked: true) } },
+                        onDive: { article in Task { await dive(article) } },
+                        onRate: { article in ratingArticle = article },
                         onOpen: { article in path.append(article) }
                     )
         case .list:  TodayListMode(
@@ -96,9 +96,7 @@ struct TodayView: View {
         deckArticles.filter { !clearedIds.contains($0.id) }
     }
 
-    private var deckArticles: [Article] {
-        Array(articles.prefix(deckCap))
-    }
+    private var deckArticles: [Article] { articles }
 
     private var tickerItems: [(Topic, String)] {
         let pool = deckArticles.prefix(6)
@@ -112,8 +110,7 @@ struct TodayView: View {
     private var streakEstimate: Int { max(1, clearedIds.count) }
 
     private func status(for article: Article) -> RowStatus {
-        if savedIds.contains(article.id) { return .saved }
-        if sparkedIds.contains(article.id) { return .sparked }
+        if divedIds.contains(article.id) { return .sparked }
         if clearedIds.contains(article.id) { return .read }
         return .unread
     }
@@ -124,48 +121,86 @@ struct TodayView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            articles = try await env.articles.listFeed(beforeFetchedAt: nil, limit: deckCap)
+            let raw = try await env.articles.listFeed(beforeFetchedAt: nil, limit: fetchLimit)
+            articles = Self.interleaveBySource(raw)
             loadError = nil
         } catch {
             loadError = error.localizedDescription
         }
     }
 
+    /// Round-robin the feed across sources so no single source (e.g. the
+    /// scholarly fetchers, which ingest last and so sort to the top by
+    /// fetched_at) ever clusters at the front of the deck. Source order is
+    /// shuffled each refresh so the deck feels fresh; within a source the
+    /// newest-first order is preserved.
+    static func interleaveBySource(_ articles: [Article]) -> [Article] {
+        var buckets: [String: [Article]] = [:]
+        var order: [String] = []
+        for a in articles {
+            if buckets[a.sourceId] == nil {
+                buckets[a.sourceId] = []
+                order.append(a.sourceId)
+            }
+            buckets[a.sourceId]?.append(a)
+        }
+        order.shuffle()
+
+        var result: [Article] = []
+        var round = 0
+        var pulled = true
+        while pulled {
+            pulled = false
+            for key in order {
+                if let bucket = buckets[key], round < bucket.count {
+                    result.append(bucket[round])
+                    pulled = true
+                }
+            }
+            round += 1
+        }
+        return result
+    }
+
     // MARK: - Actions
     //
-    // Mapping until the rating schema ships (PRODUCT_SPEC §3):
-    //   pass  → passed_at  → card leaves the deck
-    //   spark → starred_at → card stays as "sparked"
-    //   save  → saved_at   (+ starred if ≥4 sparks)
+    // Swipe economy (PRODUCT_SPEC §2/§3):
+    //   ← pass  → passed_at + meta rating "down"  → guilt-free clear
+    //   → like  → passed_at + meta rating "up"    → logged taste, still clears
+    //   ↑ dive  → starred_at                      → the scarce shortlist
+    //   hold    → rating sheet (sparks + note → meta; ≥4 also dives)
     //
-    // All three count as "cleared" toward the bounded-session arc (§2).
+    // Any interaction removes the card from `feed_articles`, so a swipe always
+    // clears. "Save for later" stays a deliberate button in the detail view,
+    // not a swipe — that's what kept the old deck producing a giant pile.
 
-    private func pass(_ article: Article) async {
+    private func pass(_ article: Article, liked: Bool) async {
         markCleared(article.id)
-        do { try await env.interactions.setAction(.pass, articleId: article.id) }
+        let meta = ["rating": liked ? "up" : "down"]
+        do { try await env.interactions.setAction(.pass, articleId: article.id, meta: meta) }
         catch { loadError = error.localizedDescription }
     }
 
-    private func save(_ article: Article) async {
+    private func dive(_ article: Article) async {
         markCleared(article.id)
-        savedIds.insert(article.id)
-        do { try await env.interactions.setAction(.save, articleId: article.id) }
+        divedIds.insert(article.id)
+        do { try await env.interactions.setAction(.star, articleId: article.id) }
         catch { loadError = error.localizedDescription }
     }
 
     private func applyRating(article: Article, sparks: Int, note: String?) async {
         guard sparks > 0 else { return }
         markCleared(article.id)
+        var meta: [String: String] = ["sparks": String(sparks)]
+        if let note, !note.isEmpty { meta["note"] = note }
         do {
-            if sparks <= 2 {
-                try await env.interactions.setAction(.pass, articleId: article.id)
+            // A strong rating (≥4) promotes to the dive list; otherwise the
+            // rating is pure feed-tuning signal and the card just clears.
+            if sparks >= 4 {
+                try await env.interactions.setAction(.star, articleId: article.id, meta: meta)
+                divedIds.insert(article.id)
             } else {
-                try await env.interactions.setAction(.star, articleId: article.id)
-                sparkedIds.insert(article.id)
-                if sparks >= 4 {
-                    try await env.interactions.setAction(.save, articleId: article.id)
-                    savedIds.insert(article.id)
-                }
+                try await env.interactions.setAction(.pass, articleId: article.id, meta: meta)
             }
         } catch {
             loadError = error.localizedDescription

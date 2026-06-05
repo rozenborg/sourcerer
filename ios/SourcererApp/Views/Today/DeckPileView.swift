@@ -5,15 +5,16 @@ import SwiftUI
 /// *feel*, not the exact transforms.
 struct DeckPileView: View {
     let articles: [Article]
-    let sparkedIds: Set<Int64>
-    let savedIds: Set<Int64>
-    /// Total cards in today's deck (for the "no. 04 / 18" plate number).
+    /// Articles promoted to the dive list (starred) this session.
+    let divedIds: Set<Int64>
+    /// Total cards in today's deck (for the "no. 04 / NN" plate number).
     let total: Int
 
-    let onPass: (Article) -> Void
-    let onSpark: (Article) -> Void
-    let onSave: (Article) -> Void
-    let onOpen: (Article) -> Void
+    let onPass: (Article) -> Void   // ← not for me
+    let onLike: (Article) -> Void   // → good, but move on
+    let onDive: (Article) -> Void   // ↑ shortlist for a deep read
+    let onRate: (Article) -> Void   // long-press → rich rating sheet
+    let onOpen: (Article) -> Void   // tap → read
 
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
@@ -50,7 +51,7 @@ struct DeckPileView: View {
                     article: article,
                     index: indexInDeck(article),
                     total: total,
-                    promoted: savedIds.contains(article.id) || sparkedIds.contains(article.id)
+                    promoted: divedIds.contains(article.id)
                 )
                 .scaleEffect(scale(forDepth: depth))
                 .rotationEffect(rotation(forDepth: depth, isTop: isTop), anchor: .bottom)
@@ -61,6 +62,9 @@ struct DeckPileView: View {
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if isTop { onOpen(article) }
+                }
+                .onLongPressGesture(minimumDuration: 0.4) {
+                    if isTop { onRate(article) }
                 }
                 .gesture(
                     isTop ?
@@ -146,11 +150,11 @@ struct DeckPileView: View {
             ZStack {
                 switch direction {
                 case .left:
-                    intentBadge("SKIP", color: Theme.Color.stone300, side: .leading)
+                    intentBadge("PASS", color: Theme.Color.stone300, side: .leading)
                 case .right:
-                    intentBadge("SAVE", color: Theme.Color.sage, side: .trailing)
+                    intentBadge("GOOD", color: Theme.Color.sage, side: .trailing)
                 case .up:
-                    intentBadge("DEEP", color: Theme.Color.accent, side: .top)
+                    intentBadge("DIVE", color: Theme.Color.accent, side: .top)
                 case .none:
                     EmptyView()
                 }
@@ -201,19 +205,19 @@ struct DeckPileView: View {
         let dx = value.translation.width
         let dy = value.translation.height
 
-        // Vertical flick → deep / spark
+        // Vertical flick → dive (the scarce shortlist).
         if dy < -flickY, abs(dy) > abs(dx) {
-            triggerSpark(article: article)
+            triggerDive(article: article)
             return
         }
-        // Right flick → save
+        // Right flick → good (logged taste, still clears).
         if dx > flickX {
-            triggerSave(article: article)
+            triggerLike(article: article)
             return
         }
-        // Left flick → skip
+        // Left flick → pass.
         if dx < -flickX {
-            triggerSkip(article: article)
+            triggerPass(article: article)
             return
         }
         // Snap back
@@ -223,7 +227,7 @@ struct DeckPileView: View {
         }
     }
 
-    private func triggerSkip(article: Article) {
+    private func triggerPass(article: Article) {
         withAnimation(.easeIn(duration: 0.22)) {
             dragOffset = CGSize(width: -600, height: dragOffset.height)
             dragRotation = -12
@@ -234,23 +238,23 @@ struct DeckPileView: View {
         }
     }
 
-    private func triggerSave(article: Article) {
+    private func triggerLike(article: Article) {
         withAnimation(.easeIn(duration: 0.22)) {
             dragOffset = CGSize(width: 600, height: dragOffset.height)
             dragRotation = 12
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-            onSave(article)
+            onLike(article)
             resetDrag()
         }
     }
 
-    private func triggerSpark(article: Article) {
+    private func triggerDive(article: Article) {
         withAnimation(.easeIn(duration: 0.18)) {
             dragOffset = CGSize(width: dragOffset.width, height: -600)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            onSpark(article)
+            onDive(article)
             resetDrag()
         }
     }
@@ -263,32 +267,41 @@ struct DeckPileView: View {
     // MARK: - Gesture hints
 
     private var gestureHints: some View {
-        HStack {
-            Label {
-                Text("skip").tracking(0.6)
-            } icon: {
-                Image(systemName: "arrow.left")
-            }
-            .font(Theme.Typography.meta(10))
-            .foregroundStyle(Theme.Color.stone300)
-
-            Spacer()
-
+        VStack(spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "hand.tap")
-                Text("tap · read").tracking(0.6)
+                Image(systemName: "arrow.up")
+                Text("dive · deep read").tracking(0.6)
             }
             .font(Theme.Typography.meta(10, weight: .bold))
             .foregroundStyle(Theme.Color.accent)
 
-            Spacer()
+            HStack {
+                Label {
+                    Text("pass").tracking(0.6)
+                } icon: {
+                    Image(systemName: "arrow.left")
+                }
+                .font(Theme.Typography.meta(10))
+                .foregroundStyle(Theme.Color.stone300)
 
-            HStack(spacing: 6) {
-                Text("save").tracking(0.6)
-                Image(systemName: "arrow.right")
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Image(systemName: "hand.tap")
+                    Text("tap read · hold rate").tracking(0.6)
+                }
+                .font(Theme.Typography.meta(10))
+                .foregroundStyle(Theme.Color.stone300)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Text("good").tracking(0.6)
+                    Image(systemName: "arrow.right")
+                }
+                .font(Theme.Typography.meta(10))
+                .foregroundStyle(Theme.Color.sage)
             }
-            .font(Theme.Typography.meta(10, weight: .bold))
-            .foregroundStyle(Theme.Color.sage)
         }
     }
 }
