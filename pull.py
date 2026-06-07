@@ -91,6 +91,7 @@ def upsert_article(sb: Client, article: dict, present_model: str) -> bool:
         "summary":           summary,
         "card_teaser":       card_teaser,
         "card_teaser_model": card_teaser_model,
+        "read_minutes":      article.get("read_minutes"),
     }
 
     try:

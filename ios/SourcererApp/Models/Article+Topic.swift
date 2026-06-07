@@ -45,13 +45,18 @@ extension Article {
         }
     }
 
-    /// Estimated read time in minutes — used in the meta row + ribbon math.
-    /// Falls back to a per-kind sane default when summary is missing.
+    /// Estimated time to consume this piece (minutes).
+    ///
+    /// Prefers `storedReadMinutes` — the value computed at pull time from
+    /// the original article's word count or audio duration. That's the
+    /// accurate path. The legacy summary-word-count fallback existed
+    /// before storedReadMinutes shipped — it produced "1m" for almost
+    /// everything because summaries cluster in a tight word range
+    /// regardless of source length, so we don't use it anymore. For old
+    /// rows without `storedReadMinutes` we fall straight to a per-kind
+    /// default, which is at least directionally right.
     var readMinutes: Int {
-        if let body = summary, !body.isEmpty {
-            let words = body.split { $0.isWhitespace }.count
-            return max(1, words / 220)
-        }
+        if let stored = storedReadMinutes, stored > 0 { return stored }
         switch sourceType {
         case .podcast:  return 35
         case .youtube:  return 8

@@ -15,6 +15,15 @@ struct Article: Identifiable, Codable, Hashable {
     /// falls back to parsing `summary` when nil (backfill window or
     /// presentation failure).
     let cardTeaser: String?
+    /// Estimated time to consume this piece in minutes, computed at pull
+    /// time from the original text length (words/220) or audio duration.
+    /// Nullable for historical rows ingested before this column existed,
+    /// for podcast/YouTube rows where duration metadata was unavailable,
+    /// and for any row pass 3 of the backfill couldn't re-extract.
+    ///
+    /// iOS callers should use the `readMinutes` computed property
+    /// (Article+Topic.swift) which falls back to a per-kind default.
+    let storedReadMinutes: Int?
     let imageUrl: String?
 
     enum CodingKeys: String, CodingKey {
@@ -28,6 +37,7 @@ struct Article: Identifiable, Codable, Hashable {
         case fetchedAt = "fetched_at"
         case summary
         case cardTeaser = "card_teaser"
+        case storedReadMinutes = "read_minutes"
         case imageUrl = "image_url"
     }
 }

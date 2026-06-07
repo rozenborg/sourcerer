@@ -21,6 +21,7 @@ works for rss/sitemap/scholarly_* sources where the article body is
 web-extractable. podcast and youtube are skipped in pass 1 because
 re-creating the transcript would require re-downloading audio/captions.
 Pass 2 works for everything — it only needs the existing summary.
+Pass 3 works for text sources — same extract_text path as pass 1.
 
 Run via .github/workflows/resummarize.yaml (09:00 UTC daily, one hour
 after the main pull cron).
@@ -37,10 +38,17 @@ from dotenv import load_dotenv
 from fetchers import (
     extract_text, summarize, present,
     DEFAULT_MAX_TOKENS, DEFAULT_PRESENT_MODEL,
+    _estimate_read_minutes,
 )
 
 # Source types we can't easily re-summarize without re-doing transcription
 SKIP_TYPES = {"podcast", "youtube"}
+
+# Source types pass 3 can backfill — text-extractable only. Podcast and
+# YouTube need audio/captions we don't keep; their historical rows stay
+# NULL and iOS uses the per-kind default. Scholarly is bulk-defaulted to
+# 12 by the migration itself.
+READ_MINUTES_BACKFILL_TYPES = {"rss", "sitemap"}
 
 # Per-run cap on teaser backfill. Protects against a large backlog (e.g.
 # the first run after the presentation pass ships) blowing through cost
@@ -48,13 +56,17 @@ SKIP_TYPES = {"podcast", "youtube"}
 # cron run; backlog drains in a few days.
 TEASER_BACKFILL_LIMIT = 250
 
+# Pass 3 has no LLM cost (just trafilatura extract + arithmetic), so the
+# cap is about wall time rather than dollars. 500 × ~1s/extract = ~8 min.
+READ_MINUTES_BACKFILL_LIMIT = 500
+
 
 def main():
     parser = argparse.ArgumentParser(
         description=(
             "Backfill articles that landed in Supabase with one or more "
-            "derived fields missing. Two passes: NULL summaries, NULL "
-            "card_teaser."
+            "derived fields missing. Three passes: NULL summaries, NULL "
+            "card_teaser, NULL read_minutes."
         )
     )
     parser.add_argument(
@@ -62,8 +74,8 @@ def main():
         metavar="YYYY-MM-DD",
         help=(
             "Only process articles with fetched_at >= this ISO date. Useful "
-            "for testing prompt changes on recent rows without churning the "
-            "whole backlog. Applies to both passes."
+            "for testing prompt or computation changes on recent rows without "
+            "churning the whole backlog. Applies to all three passes."
         ),
     )
     args = parser.parse_args()
@@ -184,9 +196,8 @@ def main():
 
     if not pending_teasers:
         print("No articles missing teasers.")
-        return
-
-    print(f"Found {len(pending_teasers)} article(s) missing teaser\n")
+    else:
+        print(f"Found {len(pending_teasers)} article(s) missing teaser\n")
 
     for art in pending_teasers:
         title = (art.get("title") or "(untitled)")[:70]
@@ -214,6 +225,54 @@ def main():
         teaser_ok += 1
 
     print(f"\nDone (teaser backfill). ok={teaser_ok}  failed={teaser_fail}  total={len(pending_teasers)}")
+
+    # --- Pass 3: read_minutes backfill (text sources only) ------------
+    print(f"\n=== Read time backfill (cap: {READ_MINUTES_BACKFILL_LIMIT}, types: {sorted(READ_MINUTES_BACKFILL_TYPES)}) ===\n")
+
+    rm_q = (
+        sb.table("articles")
+        .select("id, title, url, source_type")
+        .is_("read_minutes", "null")
+        .not_.is_("summary", "null")
+        .in_("source_type", sorted(READ_MINUTES_BACKFILL_TYPES))
+        .order("fetched_at", desc=False)
+        .limit(READ_MINUTES_BACKFILL_LIMIT)
+    )
+    if args.since:
+        rm_q = rm_q.gte("fetched_at", args.since)
+    pending_rm = cast(list[dict[str, Any]], (rm_q.execute().data) or [])
+
+    rm_ok = rm_skipped = 0
+
+    if not pending_rm:
+        print("No articles missing read_minutes (within backfillable types).")
+        return
+
+    print(f"Found {len(pending_rm)} article(s) to backfill read_minutes\n")
+
+    for art in pending_rm:
+        title = (art.get("title") or "(untitled)")[:70]
+        source_type = art.get("source_type") or "?"
+        url = art.get("url") or ""
+        prefix = f"[{source_type}] {title}"
+
+        if not url:
+            print(f"  skip  {prefix}  (no URL)")
+            rm_skipped += 1
+            continue
+
+        text = extract_text(url)
+        minutes = _estimate_read_minutes(text)
+        if minutes is None:
+            print(f"  skip  {prefix}  (extract returned nothing)")
+            rm_skipped += 1
+            continue
+
+        sb.table("articles").update({"read_minutes": minutes}).eq("id", art["id"]).execute()
+        print(f"  ok    {prefix}  → {minutes}m")
+        rm_ok += 1
+
+    print(f"\nDone (read_minutes backfill). ok={rm_ok}  skipped={rm_skipped}  total={len(pending_rm)}")
 
 
 if __name__ == "__main__":
