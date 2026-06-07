@@ -35,7 +35,7 @@ final class PreviewArticleRepository: ArticleRepository {
 }
 
 final class PreviewInteractionsRepository: InteractionsRepository {
-    func setAction(_ action: InteractionAction, articleId: Int64) async throws {}
+    func setAction(_ action: InteractionAction, articleId: Int64, meta: [String: String]?) async throws {}
     func clearAction(_ action: InteractionAction, articleId: Int64) async throws {}
     func interaction(for articleId: Int64) async throws -> ArticleInteraction? { nil }
 }
