@@ -1,17 +1,19 @@
 -- Sourcerer schema. Paste this into Supabase SQL Editor and Run.
 
 create table if not exists articles (
-  id           bigserial primary key,
-  url          text unique not null,
-  title        text,
-  source_id    text not null,
-  source_name  text,
-  source_type  text,
-  published_at timestamptz,
-  fetched_at   timestamptz not null default now(),
-  summary      text,
-  raw_text     text,
-  metadata     jsonb default '{}'::jsonb
+  id                 bigserial primary key,
+  url                text unique not null,
+  title              text,
+  source_id          text not null,
+  source_name        text,
+  source_type        text,
+  published_at       timestamptz,
+  fetched_at         timestamptz not null default now(),
+  summary            text,
+  card_teaser        text,
+  card_teaser_model  text,
+  raw_text           text,
+  metadata           jsonb default '{}'::jsonb
 );
 
 create index if not exists articles_source_id_idx     on articles (source_id);

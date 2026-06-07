@@ -442,6 +442,92 @@ def summarize(text: str, source_type: str = "rss", title: str = "",
     return _summarize_anthropic(full_prompt, model, max_tokens)
 
 
+# --- Presentation pass: rich summary -> short card teaser ----------------
+#
+# The DB summary is comprehensive (rich Gemini Flash output). The iOS deck
+# card UI needs a 1-2 sentence hook beneath the title — too short to carve
+# out reliably from arbitrary prose. This second pass rewrites the summary
+# into a teaser sized for the card. Output is stored in articles.card_teaser
+# alongside the canonical summary. iOS prefers the teaser, falls back to
+# parsing the summary when NULL (backfill window or presentation failure).
+
+PRESENT_PROMPT = """\
+You are rewriting a comprehensive article summary into a short "card teaser"
+for a mobile reading app. The teaser appears beneath the article title in a
+deck-style UI — the reader sees only the title and this teaser before
+deciding to swipe past or read on.
+
+Voice: state the substance directly. The teaser IS the substance, not a
+description of the substance. Write as if you are the source itself
+relaying its finding — never describe what the piece does or refer to it.
+
+  BAD:  "In this piece, the author argues that AI is reshaping leadership."
+  GOOD: "AI is reshaping leadership — three CHROs explain how strategy
+         and decision-making must evolve."
+
+  BAD:  "This article explores how Endava uses Codex to scale engineering."
+  GOOD: "Endava shifted from writing code to managing AI agents trained
+         on senior engineers' expertise."
+
+Other requirements:
+- 1-2 sentences, roughly 25-45 words total.
+- Never refer to the source — no "in this article", "the piece", "the
+  author", "the paper finds", "the post argues", or similar. State the
+  finding directly instead.
+- Be specific. Name the concrete thing, not the category of thing.
+- Match the source's register: serious for research papers, conversational
+  for blog posts.
+- Plain prose. No quotes, no preamble, no bullet points, no markdown.
+
+Title: {title}
+Source type: {source_type}
+
+Comprehensive summary:
+{summary}
+
+Return only the teaser text."""
+
+DEFAULT_PRESENT_MODEL = "claude-haiku-4-5-20251001"
+PRESENT_MAX_TOKENS = 300
+
+
+def _strip_mollick_prefix(summary: str) -> str:
+    """Strip the scholarly `_Mollick-likeness: NN/20 — reason_` prefix.
+
+    Without this, the presentation pass sees the rubric rationale as the
+    leading content and can echo it instead of the actual paper substance.
+    iOS ParsedSummary does the equivalent strip at display time.
+    """
+    if not summary.startswith("_Mollick-likeness:"):
+        return summary
+    nl_idx = summary.find("\n")
+    if nl_idx == -1:
+        return summary
+    return summary[nl_idx + 1:].lstrip()
+
+
+def present(summary: str, title: str = "", source_type: str = "rss",
+            model: str = DEFAULT_PRESENT_MODEL) -> Optional[str]:
+    """Turn a rich summary into a short card teaser.
+
+    Reuses the same dispatch + retry plumbing as summarize() — pass a
+    `gemini-*` model name to route to Gemini, anything else to Anthropic.
+    Returns the teaser string on success, or None on failure (caller
+    writes NULL; resummarize_pending.py backfills later).
+    """
+    if not summary:
+        return None
+    cleaned = _strip_mollick_prefix(summary)
+    prompt = PRESENT_PROMPT.format(
+        title=title,
+        source_type=source_type,
+        summary=cleaned,
+    )
+    if model.startswith("gemini"):
+        return _summarize_gemini(prompt, model, PRESENT_MAX_TOKENS)
+    return _summarize_anthropic(prompt, model, PRESENT_MAX_TOKENS)
+
+
 # ---------------------------------------------------------------------------
 # Source fetchers
 # ---------------------------------------------------------------------------

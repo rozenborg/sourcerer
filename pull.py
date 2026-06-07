@@ -18,6 +18,7 @@ load_dotenv()
 from fetchers import (
     fetch_rss, fetch_sitemap, fetch_podcast, fetch_youtube,
     fetch_scholarly, fetch_scholarly_rss, fetch_scholarly_authors,
+    present, DEFAULT_PRESENT_MODEL,
 )
 
 
@@ -60,18 +61,36 @@ def load_seen_urls(sb: Client, source_id: str, limit: int = 5000) -> set[str]:
     return {row["url"] for row in (resp.data or [])}
 
 
-def upsert_article(sb: Client, article: dict) -> bool:
+def upsert_article(sb: Client, article: dict, present_model: str) -> bool:
     dt = article.get("date")
     published_at = dt.isoformat() if hasattr(dt, "isoformat") else None
 
+    summary = article.get("summary")
+    card_teaser = None
+    card_teaser_model = None
+    # Presentation pass only runs when summarization succeeded — without a
+    # summary there's nothing to rewrite, and resummarize_pending.py will
+    # pick this row up later (which will also backfill the teaser).
+    if summary:
+        card_teaser = present(
+            summary,
+            title=article.get("title") or "",
+            source_type=article.get("source_type") or "rss",
+            model=present_model,
+        )
+        if card_teaser:
+            card_teaser_model = present_model
+
     row = {
-        "url":          article["url"],
-        "title":        article.get("title"),
-        "source_id":    article["source_id"],
-        "source_name":  article.get("source_name"),
-        "source_type":  article.get("source_type"),
-        "published_at": published_at,
-        "summary":      article.get("summary"),
+        "url":               article["url"],
+        "title":             article.get("title"),
+        "source_id":         article["source_id"],
+        "source_name":       article.get("source_name"),
+        "source_type":       article.get("source_type"),
+        "published_at":      published_at,
+        "summary":           summary,
+        "card_teaser":       card_teaser,
+        "card_teaser_model": card_teaser_model,
     }
 
     try:
@@ -108,9 +127,11 @@ def process_source(sb: Client, source: dict, settings: dict) -> tuple[int, str |
     except Exception as e:
         return 0, str(e)
 
+    present_model = settings.get("presentation_model", DEFAULT_PRESENT_MODEL)
+
     count = 0
     for article in articles:
-        if upsert_article(sb, article):
+        if upsert_article(sb, article, present_model):
             count += 1
     return count, None
 

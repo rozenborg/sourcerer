@@ -72,6 +72,7 @@ enum MockData {
             - Routing learned end-to-end, no MoE-style aux loss
             - Wall-clock advantage holds out to 32k context
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -83,6 +84,7 @@ enum MockData {
             Alignment team
             Six-hour coding agents diverge less than expected. The mechanism appears to be self-correction at task transitions, not in-step reasoning. Reframes where to invest agent-eval effort.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -94,6 +96,7 @@ enum MockData {
             M. Bertrand
             Foundation-model providers must publish training-data summaries and standardized red-team reports. Enforcement begins in 90 days. Compliance teams will feel this.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -104,6 +107,7 @@ enum MockData {
             summary: """
             Wide-ranging interview covering structure prediction, generative design, wet-lab feedback loops, and what comes after AlphaFold.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -115,6 +119,7 @@ enum MockData {
             Park, Okafor, Reddy
             The authors localize jailbreak success to a small set of polysemantic features. Ablating ~40 features removes ~70% of attacks with minimal capability loss.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -126,6 +131,7 @@ enum MockData {
             Ben Thompson
             Unbundling Copilot from per-seat into consumption tiers is the real story this week — and the canary for how every enterprise SaaS will price AI.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -137,6 +143,7 @@ enum MockData {
             @karpathy
             A short thread on what scaling-pilled and scaling-skeptical readers each get wrong about Sutton's essay a decade later.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -147,6 +154,7 @@ enum MockData {
             summary: """
             Walkthrough of a Nature paper using a small diffusion model to propose binders. Wet-lab validation rate ~3× the rational-design baseline.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -158,6 +166,7 @@ enum MockData {
             A. Robertson
             The on-device-plus-PCC architecture lands 14 months after US launch. Auditability tooling for security researchers ships in the same update.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -169,6 +178,7 @@ enum MockData {
             Iyer, Brennan, Lu
             Instead of retrieving text chunks, the model caches and replays the hidden states of prior context. Matches RAG at 200k tokens with simpler infra.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -180,6 +190,7 @@ enum MockData {
             Zvi Mowshowitz
             Weekly roundup. This week's through-line: capability evals are quietly drifting upward across labs and the public reporting hasn't caught up.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         ),
         Article(
@@ -191,6 +202,7 @@ enum MockData {
             u/grad_descent
             Thoughtful discussion thread with several authors of original scaling-law papers chiming in. Verdict: not dead, but mis-stated for years.
             """,
+            cardTeaser: nil,
             imageUrl: nil
         )
     ]

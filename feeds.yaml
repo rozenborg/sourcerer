@@ -198,3 +198,9 @@ settings:
   # Mollick-likeness scoring for scholarly sources — small, cheap, used
   # only as a gate before paying for summarization.
   scoring_model: claude-haiku-4-5-20251001
+  # Card teaser generation — runs over the rich summary to produce a
+  # 1-2 sentence hook for the iOS deck UI. Picked over gemini-2.5-flash-lite
+  # in the presentation_lab.py bake-off (Haiku produced more concrete hooks
+  # at this volume's negligible cost). Runs inline in pull.py;
+  # resummarize_pending.py backfills NULL teasers on the 09:00 UTC cron.
+  presentation_model: claude-haiku-4-5-20251001
