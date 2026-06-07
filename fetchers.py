@@ -75,6 +75,58 @@ def _extract_link(entry) -> Optional[str]:
     return None
 
 
+# Words-per-minute used to estimate read time at pull time.
+WORDS_PER_MINUTE = 220
+
+# Scholarly papers are summarized from abstracts, but the user reads the
+# full paper. We have no easy/cheap way to know the full length, so use
+# a single sensible default. Adjust if it consistently feels wrong.
+SCHOLARLY_DEFAULT_READ_MINUTES = 12
+
+
+def _estimate_read_minutes(text: str | None) -> Optional[int]:
+    """Words-per-minute heuristic for text articles.
+
+    Returns None when text is empty/missing so the caller can store NULL
+    and let iOS fall back to a per-kind default.
+    """
+    if not text:
+        return None
+    words = len(text.split())
+    if words == 0:
+        return None
+    return max(1, words // WORDS_PER_MINUTE)
+
+
+def _parse_itunes_duration(value) -> Optional[int]:
+    """Parse iTunes-style podcast duration to minutes.
+
+    Accepts HH:MM:SS, MM:SS, or raw seconds — all three appear in the
+    wild. Returns None for anything unparseable (caller stores NULL).
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        if ":" in s:
+            nums = [int(p) for p in s.split(":")]
+            if len(nums) == 3:
+                total_sec = nums[0] * 3600 + nums[1] * 60 + nums[2]
+            elif len(nums) == 2:
+                total_sec = nums[0] * 60 + nums[1]
+            else:
+                return None
+        else:
+            total_sec = int(s)
+    except ValueError:
+        return None
+    if total_sec <= 0:
+        return None
+    return max(1, round(total_sec / 60))
+
+
 def _matches_keywords(text: str, keywords: list[str]) -> bool:
     """Check if text matches any keyword (word-boundary regex)."""
     text_lower = text.lower()
@@ -442,6 +494,92 @@ def summarize(text: str, source_type: str = "rss", title: str = "",
     return _summarize_anthropic(full_prompt, model, max_tokens)
 
 
+# --- Presentation pass: rich summary -> short card teaser ----------------
+#
+# The DB summary is comprehensive (rich Gemini Flash output). The iOS deck
+# card UI needs a 1-2 sentence hook beneath the title — too short to carve
+# out reliably from arbitrary prose. This second pass rewrites the summary
+# into a teaser sized for the card. Output is stored in articles.card_teaser
+# alongside the canonical summary. iOS prefers the teaser, falls back to
+# parsing the summary when NULL (backfill window or presentation failure).
+
+PRESENT_PROMPT = """\
+You are rewriting a comprehensive article summary into a short "card teaser"
+for a mobile reading app. The teaser appears beneath the article title in a
+deck-style UI — the reader sees only the title and this teaser before
+deciding to swipe past or read on.
+
+Voice: state the substance directly. The teaser IS the substance, not a
+description of the substance. Write as if you are the source itself
+relaying its finding — never describe what the piece does or refer to it.
+
+  BAD:  "In this piece, the author argues that AI is reshaping leadership."
+  GOOD: "AI is reshaping leadership — three CHROs explain how strategy
+         and decision-making must evolve."
+
+  BAD:  "This article explores how Endava uses Codex to scale engineering."
+  GOOD: "Endava shifted from writing code to managing AI agents trained
+         on senior engineers' expertise."
+
+Other requirements:
+- 1-2 sentences, roughly 25-45 words total.
+- Never refer to the source — no "in this article", "the piece", "the
+  author", "the paper finds", "the post argues", or similar. State the
+  finding directly instead.
+- Be specific. Name the concrete thing, not the category of thing.
+- Match the source's register: serious for research papers, conversational
+  for blog posts.
+- Plain prose. No quotes, no preamble, no bullet points, no markdown.
+
+Title: {title}
+Source type: {source_type}
+
+Comprehensive summary:
+{summary}
+
+Return only the teaser text."""
+
+DEFAULT_PRESENT_MODEL = "claude-haiku-4-5-20251001"
+PRESENT_MAX_TOKENS = 300
+
+
+def _strip_mollick_prefix(summary: str) -> str:
+    """Strip the scholarly `_Mollick-likeness: NN/20 — reason_` prefix.
+
+    Without this, the presentation pass sees the rubric rationale as the
+    leading content and can echo it instead of the actual paper substance.
+    iOS ParsedSummary does the equivalent strip at display time.
+    """
+    if not summary.startswith("_Mollick-likeness:"):
+        return summary
+    nl_idx = summary.find("\n")
+    if nl_idx == -1:
+        return summary
+    return summary[nl_idx + 1:].lstrip()
+
+
+def present(summary: str, title: str = "", source_type: str = "rss",
+            model: str = DEFAULT_PRESENT_MODEL) -> Optional[str]:
+    """Turn a rich summary into a short card teaser.
+
+    Reuses the same dispatch + retry plumbing as summarize() — pass a
+    `gemini-*` model name to route to Gemini, anything else to Anthropic.
+    Returns the teaser string on success, or None on failure (caller
+    writes NULL; resummarize_pending.py backfills later).
+    """
+    if not summary:
+        return None
+    cleaned = _strip_mollick_prefix(summary)
+    prompt = PRESENT_PROMPT.format(
+        title=title,
+        source_type=source_type,
+        summary=cleaned,
+    )
+    if model.startswith("gemini"):
+        return _summarize_gemini(prompt, model, PRESENT_MAX_TOKENS)
+    return _summarize_anthropic(prompt, model, PRESENT_MAX_TOKENS)
+
+
 # ---------------------------------------------------------------------------
 # Source fetchers
 # ---------------------------------------------------------------------------
@@ -509,6 +647,7 @@ def fetch_rss(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             "source_name": source["name"],
             "source_type": "rss",
             "summary": summary,
+            "read_minutes": _estimate_read_minutes(text),
         })
 
     return articles
@@ -582,6 +721,7 @@ def fetch_sitemap(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             "source_name": source["name"],
             "source_type": "sitemap",
             "summary": summary,
+            "read_minutes": _estimate_read_minutes(text),
         })
 
     return articles
@@ -698,6 +838,13 @@ def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
 
         summary = summarize(transcript, source_type="youtube", title=title, model=model, max_tokens=settings.get("summarization_max_tokens", DEFAULT_MAX_TOKENS))
 
+        # yt-dlp's flat extract includes `duration` (seconds) for video
+        # entries when available. Falls through to None when absent.
+        video_duration_sec = entry.get("duration")
+        read_minutes = None
+        if isinstance(video_duration_sec, (int, float)) and video_duration_sec > 0:
+            read_minutes = max(1, round(video_duration_sec / 60))
+
         articles.append({
             "title": title,
             "url": url,
@@ -706,6 +853,7 @@ def fetch_youtube(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             "source_name": source["name"],
             "source_type": "youtube",
             "summary": summary,
+            "read_minutes": read_minutes,
         })
 
     return articles
@@ -770,6 +918,7 @@ def fetch_podcast(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             "source_name": source["name"],
             "source_type": "podcast",
             "summary": summary,
+            "read_minutes": _parse_itunes_duration(entry.get("itunes_duration")),
         })
 
     return articles
@@ -1086,6 +1235,7 @@ def fetch_scholarly_authors(source: dict, seen_urls: set, settings: dict) -> lis
             "source_name": source["name"],
             "source_type": "scholarly",
             "summary": summary,
+            "read_minutes": SCHOLARLY_DEFAULT_READ_MINUTES,
         })
 
     return articles
@@ -1175,6 +1325,7 @@ def fetch_scholarly_rss(source: dict, seen_urls: set, settings: dict) -> list[di
             "source_name": source["name"],
             "source_type": "scholarly",  # store as scholarly so DB queries treat them uniformly
             "summary": summary,
+            "read_minutes": SCHOLARLY_DEFAULT_READ_MINUTES,
         })
 
     return articles
@@ -1269,6 +1420,7 @@ def fetch_scholarly(source: dict, seen_urls: set, settings: dict) -> list[dict]:
             "source_name": source["name"],
             "source_type": "scholarly",
             "summary": summary,
+            "read_minutes": SCHOLARLY_DEFAULT_READ_MINUTES,
         })
 
     return articles

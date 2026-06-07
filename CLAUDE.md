@@ -63,6 +63,13 @@ set from Supabase, dispatches by `type`, and upserts results with a
   flags this as "Security Definer View". Always add
   `with (security_invoker = true)` when creating a view. Example in
   `ios/supabase/migrations/20260528000000_feed_articles_hide_null_summary.sql`.
+- **Postgres `select *` in views is resolved at CREATE TIME**, not query
+  time. `CREATE VIEW v AS SELECT a.*` snapshots the column list at the
+  moment of creation; adding columns to `articles` later does NOT
+  propagate to the view. After adding columns to `articles` you must
+  `DROP VIEW; CREATE VIEW;` to expose them via `feed_articles`. Bit us
+  when `card_teaser` was added — iOS got no error, just silently null
+  values. Fix pattern in `ios/supabase/migrations/20260530000001_recreate_feed_articles_for_card_teaser.sql`.
 - **Supabase URL**: it's `https://<project-id>.supabase.co` (API endpoint),
   **not** `https://supabase.com/dashboard/project/<project-id>` (dashboard
   UI). Easy mistake when copying from the browser.

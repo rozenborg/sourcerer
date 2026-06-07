@@ -86,17 +86,10 @@ sources:
     feed_url: https://feeds.podcastai.com/lzSp5oGSGEaLNzHdqUBaTh.xml
     notes: "Short daily episodes (~10 min)"
 
-  # --- YouTube channels (uses captions; videos without captions are skipped) ---
-  # channel_url accepts any YouTube channel URL form (handle, /channel/UC..., /@name)
-  - id: sequoia-capital
-    name: "Sequoia Capital"
-    type: youtube
-    channel_url: https://www.youtube.com/@SequoiaCapital
-
-  - id: lennys-podcast
-    name: "Lenny's Podcast"
-    type: youtube
-    channel_url: https://www.youtube.com/@LennysPodcast
+  # YouTube sources are paused — cookie-rotation tax (every 1-3 days under
+  # datacenter IP) is too high relative to value. To re-enable: add `type: youtube`
+  # entries here, refresh YOUTUBE_COOKIES GitHub secret. See CLAUDE.md "YouTube"
+  # section for the operational details.
 
   # --- Scholarly papers (Mollick-style filter via Semantic Scholar recommender) ---
   - id: scholarly-mollick-style
@@ -198,3 +191,9 @@ settings:
   # Mollick-likeness scoring for scholarly sources — small, cheap, used
   # only as a gate before paying for summarization.
   scoring_model: claude-haiku-4-5-20251001
+  # Card teaser generation — runs over the rich summary to produce a
+  # 1-2 sentence hook for the iOS deck UI. Picked over gemini-2.5-flash-lite
+  # in the presentation_lab.py bake-off (Haiku produced more concrete hooks
+  # at this volume's negligible cost). Runs inline in pull.py;
+  # resummarize_pending.py backfills NULL teasers on the 09:00 UTC cron.
+  presentation_model: claude-haiku-4-5-20251001

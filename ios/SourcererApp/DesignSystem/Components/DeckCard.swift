@@ -33,7 +33,7 @@ struct DeckCard: View {
             }
 
             Text(article.title ?? "Untitled")
-                .font(Theme.Typography.display(28))
+                .font(Theme.Typography.display(24))
                 .kerning(-0.4)
                 .lineSpacing(1)
                 .foregroundStyle(Theme.Color.ink)
@@ -91,9 +91,18 @@ struct DeckCard: View {
         .modifier(DeckCardShadow(promoted: promoted))
     }
 
-    /// Concatenated deck text: headline first (if any), then the first body
-    /// paragraph. Strips bullets so the deck reads as prose.
+    /// Text under the title in deck mode.
+    ///
+    /// Prefers `cardTeaser` — the Haiku presentation pass output, purpose-
+    /// built for this slot. Falls back to deriving a line from the rich
+    /// summary during the backfill window or when the presentation pass
+    /// failed. The fallback path is what kept the deck readable while
+    /// summaries were still the old HEADLINE+bullets shape.
     private var deckText: String {
+        if let teaser = article.cardTeaser?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !teaser.isEmpty {
+            return teaser
+        }
         var parts: [String] = []
         if let h = parsed.headline, !h.isEmpty { parts.append(h) }
         let firstPara = parsed.body
@@ -112,13 +121,21 @@ struct DeckCard: View {
     }
 
     private var metaLine: String {
-        let parts = [
+        var parts: [String] = [
             "\(article.kindGlyph) \(article.kindLabel)",
             article.sourceName ?? article.sourceId,
-            "\(article.readMinutes)m"
         ]
+        if let date = article.publishedAt {
+            parts.append(Self.relativeFormatter.localizedString(for: date, relativeTo: Date()))
+        }
         return parts.joined(separator: " · ")
     }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
 
     private var youSaidCallout: some View {
         VStack(alignment: .leading, spacing: 8) {
