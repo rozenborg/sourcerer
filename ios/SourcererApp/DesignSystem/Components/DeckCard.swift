@@ -33,7 +33,7 @@ struct DeckCard: View {
             }
 
             Text(article.title ?? "Untitled")
-                .font(Theme.Typography.display(28))
+                .font(Theme.Typography.display(24))
                 .kerning(-0.4)
                 .lineSpacing(1)
                 .foregroundStyle(Theme.Color.ink)
@@ -121,13 +121,21 @@ struct DeckCard: View {
     }
 
     private var metaLine: String {
-        let parts = [
+        var parts: [String] = [
             "\(article.kindGlyph) \(article.kindLabel)",
             article.sourceName ?? article.sourceId,
-            "\(article.readMinutes)m"
         ]
+        if let date = article.publishedAt {
+            parts.append(Self.relativeFormatter.localizedString(for: date, relativeTo: Date()))
+        }
         return parts.joined(separator: " · ")
     }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
 
     private var youSaidCallout: some View {
         VStack(alignment: .leading, spacing: 8) {
