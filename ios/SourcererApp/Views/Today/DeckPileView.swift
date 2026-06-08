@@ -3,18 +3,18 @@ import SwiftUI
 /// The visible card pile — top 3 cards rendered, top card draggable. The
 /// rotations communicate "tactile card pile"; the design says match the
 /// *feel*, not the exact transforms.
+///
+/// Gesture map (the triage economy):
+///   ← skip · → save · ↑ postpone (reshuffle deeper) · tap read
 struct DeckPileView: View {
     let articles: [Article]
-    /// Articles promoted to the dive list (starred) this session.
-    let divedIds: Set<Int64>
     /// Total cards in today's deck (for the "no. 04 / NN" plate number).
     let total: Int
 
-    let onPass: (Article) -> Void   // ← not for me
-    let onLike: (Article) -> Void   // → good, but move on
-    let onDive: (Article) -> Void   // ↑ shortlist for a deep read
-    let onRate: (Article) -> Void   // long-press → rich rating sheet
-    let onOpen: (Article) -> Void   // tap → read
+    let onSkip: (Article) -> Void       // ← not for me
+    let onSave: (Article) -> Void       // → keep it
+    let onPostpone: (Article) -> Void   // ↑ ask me later (reshuffle deeper)
+    let onOpen: (Article) -> Void       // tap → read
 
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
@@ -50,8 +50,7 @@ struct DeckPileView: View {
                 DeckCard(
                     article: article,
                     index: indexInDeck(article),
-                    total: total,
-                    promoted: divedIds.contains(article.id)
+                    total: total
                 )
                 .scaleEffect(scale(forDepth: depth))
                 .rotationEffect(rotation(forDepth: depth, isTop: isTop), anchor: .bottom)
@@ -62,9 +61,6 @@ struct DeckPileView: View {
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if isTop { onOpen(article) }
-                }
-                .onLongPressGesture(minimumDuration: 0.4) {
-                    if isTop { onRate(article) }
                 }
                 .gesture(
                     isTop ?
@@ -85,18 +81,18 @@ struct DeckPileView: View {
 
     private var emptyDoneState: some View {
         VStack(spacing: 18) {
-            BriefingOrb(diameter: 140)
-            Text("today is done.")
-                .font(Theme.Typography.display(34))
+            OrbView(size: 72, halo: true)
+            Text("today's deck is clear.")
+                .font(Theme.Typography.display(30))
                 .kerning(-0.6)
                 .foregroundStyle(Theme.Color.ink)
-            Text("You cleared the deck. Come back tomorrow at 06:30 for a fresh one.")
+            Text("You're caught up. Pull to refresh, or come back as new pieces land.")
                 .font(Theme.Typography.serif(15).italic())
                 .foregroundStyle(Theme.Color.inkSoft)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
-        .padding(.top, 40)
+        .padding(.top, 60)
         .frame(maxWidth: .infinity)
     }
 
@@ -136,8 +132,6 @@ struct DeckPileView: View {
     }
 
     private func indexInDeck(_ article: Article) -> Int {
-        // Position in the original deck order — best-effort. Without per-deck
-        // state we just show the position among remaining cards.
         (articles.firstIndex(where: { $0.id == article.id }) ?? 0) + 1
     }
 
@@ -150,11 +144,11 @@ struct DeckPileView: View {
             ZStack {
                 switch direction {
                 case .left:
-                    intentBadge("PASS", color: Theme.Color.stone300, side: .leading)
+                    intentBadge("SKIP", color: Theme.Color.stone300, side: .leading)
                 case .right:
-                    intentBadge("GOOD", color: Theme.Color.sage, side: .trailing)
+                    intentBadge("SAVE", color: Theme.Color.sage, side: .trailing)
                 case .up:
-                    intentBadge("DIVE", color: Theme.Color.accent, side: .top)
+                    intentBadge("LATER", color: Theme.Color.accent, side: .top)
                 case .none:
                     EmptyView()
                 }
@@ -205,19 +199,19 @@ struct DeckPileView: View {
         let dx = value.translation.width
         let dy = value.translation.height
 
-        // Vertical flick → dive (the scarce shortlist).
+        // Vertical flick → postpone (reshuffle deeper, no persistence).
         if dy < -flickY, abs(dy) > abs(dx) {
-            triggerDive(article: article)
+            triggerPostpone(article: article)
             return
         }
-        // Right flick → good (logged taste, still clears).
+        // Right flick → save (keep it).
         if dx > flickX {
-            triggerLike(article: article)
+            triggerSave(article: article)
             return
         }
-        // Left flick → pass.
+        // Left flick → skip.
         if dx < -flickX {
-            triggerPass(article: article)
+            triggerSkip(article: article)
             return
         }
         // Snap back
@@ -227,34 +221,34 @@ struct DeckPileView: View {
         }
     }
 
-    private func triggerPass(article: Article) {
+    private func triggerSkip(article: Article) {
         withAnimation(.easeIn(duration: 0.22)) {
             dragOffset = CGSize(width: -600, height: dragOffset.height)
             dragRotation = -12
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-            onPass(article)
+            onSkip(article)
             resetDrag()
         }
     }
 
-    private func triggerLike(article: Article) {
+    private func triggerSave(article: Article) {
         withAnimation(.easeIn(duration: 0.22)) {
             dragOffset = CGSize(width: 600, height: dragOffset.height)
             dragRotation = 12
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-            onLike(article)
+            onSave(article)
             resetDrag()
         }
     }
 
-    private func triggerDive(article: Article) {
+    private func triggerPostpone(article: Article) {
         withAnimation(.easeIn(duration: 0.18)) {
             dragOffset = CGSize(width: dragOffset.width, height: -600)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            onDive(article)
+            onPostpone(article)
             resetDrag()
         }
     }
@@ -270,14 +264,14 @@ struct DeckPileView: View {
         VStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.up")
-                Text("dive · deep read").tracking(0.6)
+                Text("later · reshuffle").tracking(0.6)
             }
             .font(Theme.Typography.meta(10, weight: .bold))
             .foregroundStyle(Theme.Color.accent)
 
             HStack {
                 Label {
-                    Text("pass").tracking(0.6)
+                    Text("skip").tracking(0.6)
                 } icon: {
                     Image(systemName: "arrow.left")
                 }
@@ -288,7 +282,7 @@ struct DeckPileView: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "hand.tap")
-                    Text("tap read · hold rate").tracking(0.6)
+                    Text("tap to read").tracking(0.6)
                 }
                 .font(Theme.Typography.meta(10))
                 .foregroundStyle(Theme.Color.stone300)
@@ -296,7 +290,7 @@ struct DeckPileView: View {
                 Spacer()
 
                 HStack(spacing: 6) {
-                    Text("good").tracking(0.6)
+                    Text("save").tracking(0.6)
                     Image(systemName: "arrow.right")
                 }
                 .font(Theme.Typography.meta(10))

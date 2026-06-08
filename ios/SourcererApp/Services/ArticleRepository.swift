@@ -2,7 +2,10 @@ import Foundation
 import Supabase
 
 protocol ArticleRepository {
-    func listFeed(beforeFetchedAt cursor: Date?, limit: Int) async throws -> [Article]
+    /// Articles the user hasn't acted on. `since` bounds the deck to a recent
+    /// window (the day's fresh batch) rather than an unbounded backlog; pass
+    /// nil for no lower bound.
+    func listFeed(beforeFetchedAt cursor: Date?, since: Date?, limit: Int) async throws -> [Article]
     func listStarred(limit: Int) async throws -> [(Article, Date)]
     func listSaved(limit: Int) async throws -> [(Article, Date)]
     func search(query: String, limit: Int) async throws -> [Article]
@@ -20,13 +23,16 @@ final class SupabaseArticleRepository: ArticleRepository {
     /// Reads from the `feed_articles` view (created in the iOS migration) which
     /// hides any article the current user already passed/starred/saved. The view
     /// is `security_invoker = true`, so `auth.uid()` resolves per request.
-    func listFeed(beforeFetchedAt cursor: Date?, limit: Int) async throws -> [Article] {
+    func listFeed(beforeFetchedAt cursor: Date?, since: Date?, limit: Int) async throws -> [Article] {
         var query = client
             .from("feed_articles")
             .select()
 
         if let cursor {
             query = query.lt("fetched_at", value: cursor.iso8601)
+        }
+        if let since {
+            query = query.gte("fetched_at", value: since.iso8601)
         }
 
         let articles: [Article] = try await query

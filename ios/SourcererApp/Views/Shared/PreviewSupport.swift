@@ -25,7 +25,7 @@ final class PreviewArticleRepository: ArticleRepository {
         self.saved = saved
     }
 
-    func listFeed(beforeFetchedAt cursor: Date?, limit: Int) async throws -> [Article] { feed }
+    func listFeed(beforeFetchedAt cursor: Date?, since: Date?, limit: Int) async throws -> [Article] { feed }
     func listStarred(limit: Int) async throws -> [(Article, Date)] { starred }
     func listSaved(limit: Int) async throws -> [(Article, Date)] { saved }
     func search(query: String, limit: Int) async throws -> [Article] {

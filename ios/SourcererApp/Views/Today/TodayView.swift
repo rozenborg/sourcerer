@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Today's deck — the daily ritual. DECK and LIST are two views of the same
-/// deck (PRODUCT_SPEC §1). Toggle in the header.
+/// deck. Toggle in the header.
 struct TodayView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(AuthService.self) private var auth
@@ -9,18 +9,25 @@ struct TodayView: View {
     @State private var mode: HomeMode = TodayView.initialMode()
     @State private var articles: [Article] = []
     @State private var clearedIds: Set<Int64> = []
-    @State private var divedIds: Set<Int64> = []
-    @State private var ratingArticle: Article? = nil
     @State private var loadError: String?
     @State private var isLoading = false
     @State private var path: [Article] = []
 
-    /// How many unseen articles to pull. No deck cap anymore — we show the
-    /// whole day's queue and the real count (the user wants to see what's
-    /// left to get through). This is a generous ceiling, not a UX cap.
+    /// Generous ceiling on the query, not a UX cap. The real bound on the
+    /// deck's size is the time window below — the deck is the day's fresh
+    /// batch, so it has a natural, completable end.
     private let fetchLimit = 250
 
-    /// Real total — every unseen card, not a bounded slice.
+    /// The deck shows recently-fetched content rather than an unbounded
+    /// backlog. Tune this if days feel too sparse or too heavy.
+    private let deckWindow: TimeInterval = 48 * 3600
+
+    /// How many cards ahead a postponed card reinserts — far enough that it
+    /// isn't the very next thing you see, close enough to resurface this
+    /// session. Session-scoped: postpone never persists.
+    private let postponeDepth = 10
+
+    /// Real total — every card still in today's deck.
     private var total: Int { articles.count }
 
     var body: some View {
@@ -28,8 +35,6 @@ struct TodayView: View {
             ZStack {
                 PageBackground(atmosphere: .calm)
                 VStack(spacing: 0) {
-                    TickerBar(items: tickerItems)
-                    StreakRibbon(streak: streakEstimate, cleared: clearedIds.count, total: total)
                     header
                         .padding(.horizontal, 22)
                         .padding(.top, 14)
@@ -48,13 +53,6 @@ struct TodayView: View {
             }
             .task { if articles.isEmpty { await refresh() } }
             .refreshable { await refresh() }
-            .sheet(item: $ratingArticle) { article in
-                RatingSheet(article: article) { sparks, note in
-                    Task { await applyRating(article: article, sparks: sparks, note: note) }
-                }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-            }
         }
     }
 
@@ -75,16 +73,14 @@ struct TodayView: View {
         switch mode {
         case .deck:  DeckPileView(
                         articles: visibleDeckArticles,
-                        divedIds: divedIds,
                         total: total,
-                        onPass: { article in Task { await pass(article, liked: false) } },
-                        onLike: { article in Task { await pass(article, liked: true) } },
-                        onDive: { article in Task { await dive(article) } },
-                        onRate: { article in ratingArticle = article },
+                        onSkip: { article in Task { await skip(article) } },
+                        onSave: { article in Task { await save(article) } },
+                        onPostpone: { article in postpone(article) },
                         onOpen: { article in path.append(article) }
                     )
         case .list:  TodayListMode(
-                        articles: deckArticles,
+                        articles: visibleDeckArticles,
                         statusFor: status(for:),
                         onTap: { article in path.append(article) }
                     )
@@ -92,25 +88,11 @@ struct TodayView: View {
     }
 
     private var visibleDeckArticles: [Article] {
-        // Filter out cleared, but keep order stable.
-        deckArticles.filter { !clearedIds.contains($0.id) }
+        // Filter out cleared (skipped/saved), keep order stable.
+        articles.filter { !clearedIds.contains($0.id) }
     }
-
-    private var deckArticles: [Article] { articles }
-
-    private var tickerItems: [(Topic, String)] {
-        let pool = deckArticles.prefix(6)
-        return pool.compactMap { a in
-            guard let t = a.title, !t.isEmpty else { return nil }
-            return (a.topic, t)
-        }
-    }
-
-    // Stub streak — PRODUCT_SPEC §7 makes this real once daily_session ships.
-    private var streakEstimate: Int { max(1, clearedIds.count) }
 
     private func status(for article: Article) -> RowStatus {
-        if divedIds.contains(article.id) { return .sparked }
         if clearedIds.contains(article.id) { return .read }
         return .unread
     }
@@ -121,8 +103,10 @@ struct TodayView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let raw = try await env.articles.listFeed(beforeFetchedAt: nil, limit: fetchLimit)
+            let since = Date().addingTimeInterval(-deckWindow)
+            let raw = try await env.articles.listFeed(beforeFetchedAt: nil, since: since, limit: fetchLimit)
             articles = Self.interleaveBySource(raw)
+            clearedIds.removeAll()
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -164,47 +148,44 @@ struct TodayView: View {
 
     // MARK: - Actions
     //
-    // Swipe economy (PRODUCT_SPEC §2/§3):
-    //   ← pass  → passed_at + meta rating "down"  → guilt-free clear
-    //   → like  → passed_at + meta rating "up"    → logged taste, still clears
-    //   ↑ dive  → starred_at                      → the scarce shortlist
-    //   hold    → rating sheet (sparks + note → meta; ≥4 also dives)
+    // The triage economy — the deck is a fast triage surface, nothing heavier:
+    //   ← skip      → passed_at        → not for me, gone from the deck
+    //   → save      → saved_at         → keep it; shows up in the Me tab
+    //   ↑ postpone  → (no persistence) → reshuffle ~10 deeper; "ask me later"
+    //   tap         → open detail (the longer summary)
     //
-    // Any interaction removes the card from `feed_articles`, so a swipe always
-    // clears. "Save for later" stays a deliberate button in the detail view,
-    // not a swipe — that's what kept the old deck producing a giant pile.
+    // Rating (stars + note) is deliberately NOT a deck gesture — it's a
+    // considered act that lives in the detail view, after you've actually
+    // engaged with the piece.
 
-    private func pass(_ article: Article, liked: Bool) async {
+    private func skip(_ article: Article) async {
         markCleared(article.id)
-        let meta = ["rating": liked ? "up" : "down"]
-        do { try await env.interactions.setAction(.pass, articleId: article.id, meta: meta) }
+        do { try await env.interactions.setAction(.pass, articleId: article.id) }
         catch { loadError = error.localizedDescription }
     }
 
-    private func dive(_ article: Article) async {
+    private func save(_ article: Article) async {
         markCleared(article.id)
-        divedIds.insert(article.id)
-        do { try await env.interactions.setAction(.star, articleId: article.id) }
+        do { try await env.interactions.setAction(.save, articleId: article.id) }
         catch { loadError = error.localizedDescription }
     }
 
-    private func applyRating(article: Article, sparks: Int, note: String?) async {
-        guard sparks > 0 else { return }
-        markCleared(article.id)
-        var meta: [String: String] = ["sparks": String(sparks)]
-        if let note, !note.isEmpty { meta["note"] = note }
-        do {
-            // A strong rating (≥4) promotes to the dive list; otherwise the
-            // rating is pure feed-tuning signal and the card just clears.
-            if sparks >= 4 {
-                try await env.interactions.setAction(.star, articleId: article.id, meta: meta)
-                divedIds.insert(article.id)
-            } else {
-                try await env.interactions.setAction(.pass, articleId: article.id, meta: meta)
-            }
-        } catch {
-            loadError = error.localizedDescription
+    /// Move the card ~`postponeDepth` *visible* cards deeper in the deck.
+    /// Session-scoped only — nothing is written. If the deck ages out before
+    /// you return to it, it ages out like everything else (no backlog).
+    private func postpone(_ article: Article) {
+        guard let from = articles.firstIndex(where: { $0.id == article.id }) else { return }
+        articles.remove(at: from)
+
+        var seen = 0
+        var insertAt = articles.count
+        var i = from
+        while i < articles.count {
+            if !clearedIds.contains(articles[i].id) { seen += 1 }
+            if seen >= postponeDepth { insertAt = i + 1; break }
+            i += 1
         }
+        articles.insert(article, at: min(insertAt, articles.count))
     }
 
     private func markCleared(_ id: Int64) {
