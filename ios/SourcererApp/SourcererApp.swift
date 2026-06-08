@@ -70,26 +70,17 @@ struct RootView: View {
 struct RootTabView: View {
     @State private var selection: Int = RootTabView.initialTab()
 
+    // Refocused to the core loop: a daily deck you triage, and a record of
+    // what you kept. Tomorrow / Briefing / Library were stripped while we
+    // get the fundamentals right; they can return once the backend earns them.
     var body: some View {
         TabView(selection: $selection) {
             TodayView()
                 .tag(0)
                 .tabItem { Label("Today", systemImage: "house.fill") }
 
-            TomorrowView()
-                .tag(1)
-                .tabItem { Label("Tomorrow", systemImage: "calendar") }
-
-            LibraryView()
-                .tag(2)
-                .tabItem { Label("Deck", systemImage: "books.vertical") }
-
-            BriefingView()
-                .tag(3)
-                .tabItem { Label("Brief", systemImage: "clock.fill") }
-
             ProfileView()
-                .tag(4)
+                .tag(1)
                 .tabItem { Label("Me", systemImage: "person.fill") }
         }
         .tint(Theme.Color.accent)
@@ -100,7 +91,7 @@ struct RootTabView: View {
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(where: { $0.hasPrefix("--tab=") }) {
             let n = args[i].dropFirst("--tab=".count)
-            return Int(n) ?? 0
+            return min(1, Int(n) ?? 0)
         }
 #endif
         return 0
