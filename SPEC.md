@@ -155,9 +155,21 @@ penalty (one prompt change). AuthorId pinning is one-time per offender.
 
 # Part 2 — The iOS app
 
-The new UX (rebuilt 2026-05-24). Five tabs: Today / Tomorrow / Deck /
-Brief / Me. Reads from the same Supabase the pipeline writes to; layers
-per-user pass / spark / save on top.
+**Refocused 2026-06-08.** The 2026-05-24 rebuild fanned out to five tabs
+(Today / Tomorrow / Deck / Brief / Me) layered on aspirational backend
+that didn't exist yet — half-implemented surfaces that set dishonest
+expectations. We stripped back to the core loop and will add surfaces
+back as the backend earns them.
+
+**Two tabs now: Today / Me.** Reads from the same Supabase the pipeline
+writes to; layers per-user skip / save (triage) + a separate ratings
+signal on top.
+
+The core loop, in three depths plus a learning signal:
+1. **Skim** — the daily deck of cards; triage by swipe.
+2. **One tap deeper** — the article detail (longer summary).
+3. **Two taps deeper** — "Open original" to the source.
+4. **Rate** — stars + note, captured for tuning the feed over time.
 
 > Several views' code comments reference a `PRODUCT_SPEC` document that
 > doesn't exist in the repo. This file is now that doc. Where vision
@@ -166,170 +178,111 @@ per-user pass / spark / save on top.
 
 ## Today — the daily deck ritual
 
-**Vision** (from PRODUCT_SPEC §1, §2). A bounded ~18-card daily deck the
-user clears with intent. Two modes over the same set: DECK (card-pile,
-gesture-driven, tactile) and LIST (dense, scannable). Each card cleared
-counts toward the daily session arc. Cards aren't an inbox — they're a
-day's reading shaped for completion.
+**Vision.** The day's fresh content, shaped for completion. A bounded
+deck (the day's batch, not an unbounded backlog) you triage with intent.
+Two modes over the same set: DECK (card-pile, gesture-driven, tactile)
+and LIST (dense, scannable). The deck has a natural end — light days are
+short, heavy days longer — so clearing it feels finite.
+
+**The gesture model (triage economy).** The deck is a *fast triage*
+surface, nothing heavier:
+- **← skip** → `passed_at`. Not for me, gone from the deck.
+- **→ save** → `saved_at`. Keep it; surfaces in the Me tab.
+- **↑ postpone** → no persistence. Reshuffles the card ~10 deeper —
+  "ask me later." Session-scoped: if the deck ages out before you return,
+  it ages out like everything else (this is the valve that keeps Save
+  from becoming a dumping ground / second pile).
+- **tap** → open detail (the longer summary).
+- Rating is deliberately **not** a deck gesture — it's a considered act
+  that lives in the detail view, after you've actually engaged.
 
 **Today.**
 - `[?]` Card pile renders top 3 with depth scale/rotation; top card is
-  draggable. Swipe left = skip, right = save, up = deep/spark.
-- `[?]` Swipe-intent badges (SKIP / SAVE / DEEP) fade in during drag;
-  snap-back if threshold isn't met.
+  draggable. Swipe-intent badges (SKIP / SAVE / LATER) fade in during
+  drag; snap-back if threshold isn't met.
 - `[?]` DECK ↔ LIST toggle in header; LIST mode is a dense scannable
   variant with status per row.
-- `[?]` Ticker bar (flashing headline strip) above the deck.
-- `[?]` Streak ribbon — currently `max(1, clearedIds.count)`, not a real
-  streak.
-- `[?]` Empty state ("today is done · come back tomorrow at 06:30") when
-  deck cleared.
+- `[?]` Deck bounded to a recent window (48h) via `listFeed(since:)`,
+  with a 250-row query ceiling as a safety limit (not a UX cap).
+- `[?]` Source-interleave so no single source clusters at the front.
+- `[?]` Empty state ("today's deck is clear · pull to refresh") when
+  cleared — no longer promises a 06:30 briefing.
 - `[stub]` **Cleared state is local-only** — `@State` set, lost on relaunch.
-- `[stub]` **Not a real curated "deck of the day"** — slices the general
-  feed to 18. No server-side per-day deck build.
+- `[stub]` **Not a server-curated "deck of the day"** — slices the recent
+  feed. No server-side per-day deck build.
 
 **Gaps.**
-- Server-side daily deck build job (06:30 cron picks ~18 from the past
-  24h based on user's rating signal).
-- `daily_session` schema for persisted clear-state, streak, and the
-  cleared/total counter.
-- Card numbering ("no. 04 / 18") should be position in the original deck,
-  not position among remaining — needs deck-build to know original order.
+- Server-side daily deck build job (cron picks the day's deck based on
+  the user's rating signal).
+- `daily_session` schema for persisted clear-state and the cleared/total
+  counter.
+- Card numbering ("no. 04 / NN") is position among remaining, not the
+  original deck order — needs deck-build to know original order.
 
-**Disposition.** This is the heart of the app. Highest-priority fixes:
-(1) persist clear-state, (2) make the streak real. Server-side curated
-deck is the bigger architectural lift but unlocks Tomorrow and Briefing.
+**Disposition.** This is the heart of the app. Highest-priority fix:
+persist clear-state (so skip/save/postpone survive relaunch). Server-side
+curated deck is the bigger architectural lift.
 
-## Tomorrow — staged for 06:30
+## Me ("Profile" tab) — the record of what you kept
 
-**Vision** (from PRODUCT_SPEC §6). What's going to be in tomorrow's deck,
-visible the night before. Saved-but-unread items + 2 follow-ups Sourcerer
-picks overnight based on what you sparked today. Sets the expectation
-that tomorrow's deck is *built*, not random.
+**Vision.** A simple, honest record: everything you've saved, newest
+first. The longitudinal view (activity grid, streaks, milestones) was
+stripped — it ran on faked/proxy data — and returns once real
+`daily_session` aggregates exist.
 
 **Today.**
-- `[?]` "From you · N saved" section pulls from `listSaved(limit: 50)`.
-- `[?]` ETA card: "your saves + items Sourcerer is watching · final pick
-  at 06:30".
-- `[?]` Tap row → ArticleDetailView.
-- `[stub]` **No 06:30 cron** — the view shows today's saves as stand-in
-  for tomorrow's.
-- `[stub]` **Follow-ups section is fake** — hardcoded chip strings
-  ("AISI Q2 report", "Llama-4 update", etc.).
-- `[stub]` **4★ stars on every row are hardcoded**, not real ratings.
+- `[?]` List of all saved articles via `listSaved(limit: 200)`; tap row →
+  ArticleDetailView.
+- `[?]` Honest empty state ("nothing saved yet · swipe a card right").
+- `[?]` Settings behind the gear (top-right).
 
 **Gaps.**
-- The overnight cron itself — picks follow-ups from sources/topics you
-  sparked, builds the deck for 06:30.
-- Real ratings on the staged rows.
+- Pagination beyond 200 saved.
+- A view of *rated* items (the ratings dataset) once we decide how to
+  surface it.
 
-**Disposition.** Until the cron exists, this view is mostly promissory.
-Triage decision: kill the fake follow-up chips now (set false expectation),
-or leave as a UI placeholder?
+**Disposition.** Deliberately minimal. The longitudinal grid/milestones
+come back when `daily_session` makes them honest.
 
-## Library ("Deck" tab) — decks of saved content
+## Parked surfaces (stripped in the 2026-06-08 refocus)
 
-**Vision** (from PRODUCT_SPEC §5). The user's collection. Default decks
-(Saved, Sparked) plus user-curated named decks (Phase 2). Items can live
-in multiple decks; an "Add to deck" sheet appears from article detail.
-Notes/highlights via `article_interactions.meta` (Phase 3).
+These shipped as UI in the 2026-05-24 rebuild but ran ahead of the
+backend. Removed from the app (view files deleted) to protect the core
+loop; the vision is preserved here for when the backend earns them back.
 
-**Today.**
-- `[?]` Tab strip: Decks / Queue / Rated / Archive.
-- `[?]` Decks tab: auto-generated "Saved" + "Sparked" tiles with
-  bookshelf visual (two back-card peeks).
-- `[?]` Queue tab = all saved articles; Rated tab = all sparked articles.
-- `[?]` Tap deck → DeckListing.
-- `[broken]` **"+ NEW DECK" button** (both the header pill and the dashed
-  tile) — empty closures, no action.
-- `[stub]` **Archive tab** — placeholder text only.
-- `[stub]` **No "Add to deck" sheet** from article detail.
+- **Tomorrow — staged for 06:30** (was PRODUCT_SPEC §6). Tomorrow's deck
+  visible the night before: saved-but-unread + overnight follow-ups
+  picked from what you rated. Needs an overnight deck-build cron that
+  doesn't exist. Was showing today's saves + hardcoded fake follow-up
+  chips + hardcoded 4★ rows.
+- **Library / "Deck" tab — curated decks** (was PRODUCT_SPEC §5). The
+  user's collection: default Saved/Sparked decks plus user-curated named
+  decks, "Add to deck" sheet, notes/highlights. The "+ NEW DECK" buttons
+  were dead (empty closures) and Archive was a placeholder. Saved content
+  now lives in the simpler Me tab.
+- **Brief — audio briefing** (was PRODUCT_SPEC Phase 4). A ~5-minute
+  audio briefing generated overnight from your top-rated items, threaded
+  into a narrative. The "TAP TO SCRY" orb did nothing; no script
+  generator, no TTS, no playback. The most aspirational surface.
 
-**Gaps.**
-- User-curated named decks (create / rename / delete).
-- "Add to deck" sheet.
-- Notes/highlights schema + UI.
-- Archive (items roll off the deck after N days).
-
-**Disposition.** "+ NEW DECK" buttons should be hidden or wired to a
-"coming soon" sheet until Phase 2 — current broken state sets bad
-expectations. Archive can stay as a placeholder if labeled honestly.
-
-## Brief ("Briefing" tab) — the orb commands
-
-**Vision** (from PRODUCT_SPEC Phase 4). A short audio briefing generated
-overnight from your ★ 4+ items, threaded into a coherent ~5-minute
-listen. Lands at 06:30. The orb is the thing you tap to play.
-
-**Today.**
-- `[?]` Top bar: current time + state label (WAITING / READY).
-- `[?]` "YOUR BRIEFING · N MIN" header with copy that changes based on
-  whether you've sparked anything.
-- `[?]` BriefingOrb (large) as the visual centerpiece.
-- `[?]` Thread card lists up to 4 sparked items.
-- `[broken]` **"TAP TO SCRY"** label under the orb — no gesture handler;
-  the orb does nothing.
-- `[stub]` **No audio briefing generation** (Phase 4).
-- `[stub]` **No briefing script** — the threading copy is aspirational.
-- `[stub]` **Sparked items via `listStarred(limit: 6)`** — not scoped to
-  "today" (no time filter); shows all-time recent sparks.
-
-**Gaps.**
-- The script generator (Claude prompt that threads sparks into a 5-min
-  narrative).
-- TTS to audio file, stored where the app can stream it.
-- Playback UI (controls, scrubber, transcript).
-- Notification at 06:30 when ready.
-
-**Disposition.** This is the most aspirational tab. Question for triage:
-does it stay a tab, or collapse into Tomorrow until Phase 4? At minimum,
-either wire the orb tap to *something* (even just a "Briefing not ready"
-sheet) or remove the "TAP TO SCRY" call-to-action.
-
-## Me ("Profile" tab) — the long record
-
-**Vision** (from PRODUCT_SPEC Phase 2). The longitudinal view. 12-week
-activity grid (GitHub-style) + milestone progress bars + member-since
-date. Builds the sense that the daily ritual accumulates into something.
-
-**Today.**
-- `[?]` 12-week activity grid (7×12 cells, density 0–4).
-- `[?]` Streak ribbon (bleeds to edges).
-- `[?]` Density legend; today's cell is boxed.
-- `[?]` Milestones block: 30-day streak, 1,000 cleared, 50 sparked,
-  topics rated 4+.
-- `[?]` Settings nav (gear icon top-right).
-- `[bug]` **"MEMBER SINCE · JAN 2026"** hardcoded — not from account
-  creation date.
-- `[bug]` **"MAR 1" axis label** hardcoded — drifts as time passes.
-- `[bug]` **Milestone math is loose** — "30-day morning streak" is
-  `totalCleared / 14`, not a real streak; "Topics rated 4+" uses
-  save count, not distinct topic count.
-- `[stub]` **Grid uses saves+sparks as proxy** for daily cleared count,
-  since `daily_session` aggregates don't exist yet.
-
-**Gaps.**
-- `daily_session` schema (per-day clear count, streak state).
-- Real "member since" from `auth.users.created_at`.
-- Real distinct-topic counter for the "Topics rated 4+" milestone.
-
-**Disposition.** Hardcoded date labels are quick fixes. Milestone math
-honesty is a bigger ask — needs the underlying schema. Until then,
-either fix the math against existing data or relabel the milestones to
-match what they actually measure.
+**Disposition.** Each is a real product idea, not abandoned — but each
+needs a server-side job (deck-build cron, briefing generator) before its
+UI is anything but promissory. Revisit once the rating dataset and a
+curated deck-build job exist; the rating signal is the prerequisite that
+makes Tomorrow's re-rank and the Brief's thread possible.
 
 ## Article detail (modal from any list)
 
-**Vision.** The reading surface for a single article. Topic chip + title
-+ parsed headline + markdown body + action row (Skip / Spark / Save) +
-"Open original" CTA. Tap Spark → opens RatingSheet.
+**Vision.** The reading surface for a single article — and the home of
+rating. Topic chip + title + parsed headline + markdown body + action row
+(Skip / Rate / Save) + "Open original" CTA. Tap Rate → opens RatingSheet.
 
 **Today.**
 - `[?]` Topic chip + prefix tag (parsed from summary).
 - `[?]` Display title in italic display font; headline below.
 - `[?]` Markdown body via MarkdownUI 2.4 (`.markdownTheme(.basic)`).
-- `[?]` Action row with toggle states (tap again to clear).
-- `[?]` Spark button → RatingSheet (same as Today).
+- `[?]` Action row: Skip / Save toggle `article_interactions`; Rate opens
+  the RatingSheet and persists to `article_ratings` (shows "Rated" once set).
 - `[?]` "Open original" CTA (cobalt with glow shadow).
 
 **Gaps.** None major — this surface is mostly complete.
@@ -339,61 +292,58 @@ once we triage the design system.
 
 ## Rating system
 
-**Vision** (from PRODUCT_SPEC §3). One-tap quick rate but expressive when
-the user wants depth. 5 sparks + reasons taxonomy + optional note.
-Ratings train tomorrow's deck (re-rank) and drive the briefing thread.
+**Vision.** Rate a piece you've engaged with: stars + an open-form note.
+A **research dataset first, a tuning input second** — the goal is honest
+capture of what the user actually thinks, in their own words. Lives in
+the detail view (a considered act), never on a deck swipe.
+
+The **"unlock"**: preset reason chips were removed because the original
+9 were guessed up front and didn't match how the user thinks. Instead,
+once enough substantive notes exist, we analyze them to surface the
+user's *own* recurring themes and offer those back as quick-tap chips —
+earned vocabulary, not invented. Not built yet; the `reasons[]` column
+is reserved so the dataset is shaped for it from day one.
 
 **Today.**
-- `[?]` 5-spark rating with phrase per level (skip / meh / decent /
-  worth it / essential).
-- `[?]` Reasons taxonomy: 9 chips (SHARP, SURPRISED ME, AGREE, DISAGREE,
-  REREAD, BORING, TOO SHALLOW, JUNK, NEW TOPIC).
-- `[?]` Optional note via TextEditor.
-- `[?]` "+ TOMORROW" CTA (bumps to 4★) and "NEXT CARD →" CTA.
-- `[stub]` **Reasons + note are NOT persisted server-side** — captured
-  in the sheet but go nowhere on submit.
-- `[stub]` **Spark→action mapping is a projection** — 1-2 = pass, 3 =
-  star, 4+ = star + save. Temporary until real ratings table ships.
+- `[delight]` `article_ratings` table shipped (migration
+  `20260608000000_article_ratings.sql`): stars (1–5), note, rated_at,
+  reserved reasons[], one row per user/article, RLS-scoped. Re-rating
+  upserts.
+- `[?]` RatingSheet: 5-star with phrase per level (skip / meh / decent /
+  worth it / essential) + optional open-form note. Single submit. Pre-fills
+  on re-rate. Persisted via `RatingsRepository`.
+- `[?]` Detail-view "Rate" action (shows "Rated" once set).
 
 **Gaps.**
-- `article_ratings` schema (sparks, reasons[], note, rated_at, article_id,
-  user_id).
-- Re-rank logic that consumes ratings.
-- Aggregation surface (Profile / Settings: "your top rated sources").
+- The note→chip "unlock" analysis (batch job over a user's notes).
+- Re-rank logic that consumes ratings (intentionally deferred — capture
+  first).
+- A surface to review your own ratings/notes.
 
-**Disposition.** This is load-bearing: without persisted ratings, the
-Briefing thread and tomorrow's re-rank are both impossible. **Priority:
-ship the ratings schema next.** Once persisted, the RatingSheet becomes
-honest.
+**Disposition.** Capture is now honest. Next concrete steps are
+deferred-by-design: accumulate notes, then build the unlock. Re-ranking
+is a later phase once we know what signal is worth training on.
 
 ## Settings
 
-**Vision.** Toggles for things the user actually controls. Grouped by
-surface (deck / briefing / rating / account).
+**Vision.** Toggles for things the user actually controls. A toggle
+appears only once the behavior behind it is wired.
 
 **Today.**
-- `[?]` Custom cobalt toggle style with glow.
-- `[?]` Sign out (with confirmation dialog).
-- `[bug]` **"Show live ticker"** toggle persists but TickerBar is always
-  rendered; setting isn't read.
-- `[bug]` **"Default to DECK"** toggle persists but TodayView always
-  starts in `.deck`; setting isn't read.
-- `[stub]` Most other toggles ("Hide read items", "Daily audio briefing",
-  "Notify when ready", "Skip already-rated", "Prompt to rate on read",
-  "Use ratings to re-rank") persist via `@AppStorage` but aren't wired
-  to behavior.
+- `[ok]` Sign out (with confirmation dialog).
+- Pared to the account section in the refocus — the old deck / briefing /
+  rating toggle banks were removed. They persisted to `@AppStorage` but
+  were never read, and most named features that no longer exist (ticker,
+  audio briefing, re-rank).
 - `[stub]` **No account deletion** (required for App Store —
   Guideline 5.1.1(v)).
 
 **Gaps.**
-- Wire the two `[bug]` toggles to actual behavior (fast).
 - Account deletion flow (blocking public App Store, not TestFlight).
-- Decide which `[stub]` toggles to keep visible vs hide until wired.
+- Re-introduce toggles as their behaviors ship.
 
-**Disposition.** Quick wins: wire ticker + default-mode toggles. Bigger
-question: settings UI promises behaviors that don't exist — either ship
-the behaviors or hide the toggles. Account deletion is App Store
-submission blocker, not TestFlight blocker.
+**Disposition.** Honest-minimal. Account deletion is an App Store
+submission blocker, not a TestFlight blocker.
 
 ## Auth
 
@@ -416,9 +366,9 @@ rows are reusable; everything composes from the same primitives.
 - `[?]` PageBackground (atmospheres: calm, dawn).
 - `[?]` Theme.Typography scales (display / serif / body / meta).
 - `[?]` Theme.Color palette (stone / ink / accent / sage).
-- `[?]` Components: TopicChip, OrbView, BriefingOrb, SparkStars,
-  StatusPill, DeckCard, ListRowCard, PageMasthead, TickerBar,
-  StreakRibbon, ModeToggle.
+- `[?]` Components: TopicChip, OrbView, BriefingOrb (auth screen),
+  SparkStars, StatusPill, DeckCard, ListRowCard, PageMasthead, ModeToggle.
+  (TickerBar and StreakRibbon were removed in the refocus.)
 
 **Disposition.** Triage from the iOS surfaces above — if a typography or
 spacing bug shows up in multiple tabs, fix at the component level here
