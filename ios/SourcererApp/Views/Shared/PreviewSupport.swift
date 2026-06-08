@@ -40,19 +40,26 @@ final class PreviewInteractionsRepository: InteractionsRepository {
     func interaction(for articleId: Int64) async throws -> ArticleInteraction? { nil }
 }
 
+final class PreviewRatingsRepository: RatingsRepository {
+    func setRating(articleId: Int64, stars: Int, note: String?) async throws {}
+    func rating(for articleId: Int64) async throws -> ArticleRating? { nil }
+}
+
 @MainActor
 extension AppEnvironment {
     /// Construct an environment backed by in-memory fakes — for SwiftUI Previews.
     static func preview(
         articles: ArticleRepository = PreviewArticleRepository(),
-        interactions: InteractionsRepository = PreviewInteractionsRepository()
+        interactions: InteractionsRepository = PreviewInteractionsRepository(),
+        ratings: RatingsRepository = PreviewRatingsRepository()
     ) -> AppEnvironment {
         let client = PreviewSupabase.client
         return AppEnvironment(
             supabase: client,
             auth: AuthService(client: client),
             articles: articles,
-            interactions: interactions
+            interactions: interactions,
+            ratings: ratings
         )
     }
 }

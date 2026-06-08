@@ -91,6 +91,59 @@ final class SupabaseInteractionsRepository: InteractionsRepository {
     }
 }
 
+// MARK: - Ratings
+
+/// The considered rating signal (stars + note), separate from the fast triage
+/// interactions. Written from the detail view; persisted to `article_ratings`.
+protocol RatingsRepository {
+    /// Upsert the current user's rating for an article. Re-rating overwrites.
+    func setRating(articleId: Int64, stars: Int, note: String?) async throws
+    func rating(for articleId: Int64) async throws -> ArticleRating?
+}
+
+final class SupabaseRatingsRepository: RatingsRepository {
+    private let client: SupabaseClient
+    private let userId: () -> UUID?
+
+    init(client: SupabaseClient, userId: @escaping () -> UUID?) {
+        self.client = client
+        self.userId = userId
+    }
+
+    func setRating(articleId: Int64, stars: Int, note: String?) async throws {
+        guard let uid = userId() else { throw AuthRequired() }
+        let now = ISO8601DateFormatter().string(from: Date())
+
+        struct Row: Encodable {
+            let user_id: UUID
+            let article_id: Int64
+            let stars: Int
+            let note: String?
+            let rated_at: String
+        }
+        // `reasons` is omitted so the column keeps its '{}' default (reserved
+        // for the future unlock). encodeIfPresent leaves `note` nil → SQL NULL.
+        let row = Row(user_id: uid, article_id: articleId, stars: stars, note: note, rated_at: now)
+        try await client
+            .from("article_ratings")
+            .upsert(row, onConflict: "user_id,article_id")
+            .execute()
+    }
+
+    func rating(for articleId: Int64) async throws -> ArticleRating? {
+        guard let uid = userId() else { return nil }
+        let rows: [ArticleRating] = try await client
+            .from("article_ratings")
+            .select("article_id, stars, note, reasons")
+            .eq("user_id", value: uid)
+            .eq("article_id", value: Int(articleId))
+            .limit(1)
+            .execute()
+            .value
+        return rows.first
+    }
+}
+
 struct AuthRequired: Error {}
 
 /// Encodes as `{ "<column>": null }` — used to set a single column to null

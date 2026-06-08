@@ -10,6 +10,7 @@ struct ArticleDetailView: View {
     @Environment(\.openURL) private var openURL
 
     @State private var interaction: ArticleInteraction?
+    @State private var rating: ArticleRating?
     @State private var actionError: String?
     @State private var showRatingSheet = false
 
@@ -102,10 +103,10 @@ struct ArticleDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .task { await loadInteraction() }
+        .task { await loadState() }
         .sheet(isPresented: $showRatingSheet) {
-            RatingSheet(article: article) { sparks, _ in
-                Task { await applyRating(sparks: sparks) }
+            RatingSheet(article: article, existing: rating) { stars, note in
+                Task { await applyRating(stars: stars, note: note) }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -124,7 +125,7 @@ struct ArticleDetailView: View {
             actionButton("Skip", icon: "xmark", on: interaction?.isPassed == true, tint: Theme.Color.stone300) {
                 Task { await toggle(.pass) }
             }
-            actionButton("Spark", icon: "star", on: interaction?.isStarred == true, tint: Theme.Color.accent) {
+            actionButton(rating == nil ? "Rate" : "Rated", icon: "star", on: rating != nil, tint: Theme.Color.accent) {
                 showRatingSheet = true
             }
             actionButton("Save", icon: "bookmark", on: interaction?.isSaved == true, tint: Theme.Color.sage) {
@@ -155,9 +156,10 @@ struct ArticleDetailView: View {
         .buttonStyle(.plain)
     }
 
-    private func loadInteraction() async {
+    private func loadState() async {
         do {
             interaction = try await env.interactions.interaction(for: article.id)
+            rating = try await env.ratings.rating(for: article.id)
         } catch {
             actionError = error.localizedDescription
         }
@@ -176,24 +178,20 @@ struct ArticleDetailView: View {
             } else {
                 try await env.interactions.setAction(action, articleId: article.id)
             }
-            await loadInteraction()
+            await loadState()
         } catch {
             actionError = error.localizedDescription
         }
     }
 
-    private func applyRating(sparks: Int) async {
-        guard sparks > 0 else { return }
+    /// Persist stars + note to `article_ratings` — the considered signal. This
+    /// is pure feed-tuning data for now; it doesn't touch the triage
+    /// interactions (skip/save) or clear the piece from anywhere.
+    private func applyRating(stars: Int, note: String?) async {
+        guard stars > 0 else { return }
         do {
-            if sparks <= 2 {
-                try await env.interactions.setAction(.pass, articleId: article.id)
-            } else {
-                try await env.interactions.setAction(.star, articleId: article.id)
-                if sparks >= 4 {
-                    try await env.interactions.setAction(.save, articleId: article.id)
-                }
-            }
-            await loadInteraction()
+            try await env.ratings.setRating(articleId: article.id, stars: stars, note: note)
+            await loadState()
         } catch {
             actionError = error.localizedDescription
         }

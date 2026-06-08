@@ -8,12 +8,17 @@ final class AppEnvironment {
     let auth: AuthService
     let articles: ArticleRepository
     let interactions: InteractionsRepository
+    let ratings: RatingsRepository
 
     init(supabaseURL: URL, supabaseAnonKey: String) {
         self.supabase = SupabaseClient(supabaseURL: supabaseURL, supabaseKey: supabaseAnonKey)
         self.auth = AuthService(client: supabase)
         self.articles = SupabaseArticleRepository(client: supabase)
         self.interactions = SupabaseInteractionsRepository(
+            client: supabase,
+            userId: { [weak auth] in auth?.userId }
+        )
+        self.ratings = SupabaseRatingsRepository(
             client: supabase,
             userId: { [weak auth] in auth?.userId }
         )
@@ -25,12 +30,14 @@ final class AppEnvironment {
         supabase: SupabaseClient,
         auth: AuthService,
         articles: ArticleRepository,
-        interactions: InteractionsRepository
+        interactions: InteractionsRepository,
+        ratings: RatingsRepository
     ) {
         self.supabase = supabase
         self.auth = auth
         self.articles = articles
         self.interactions = interactions
+        self.ratings = ratings
     }
 
     convenience init() {
