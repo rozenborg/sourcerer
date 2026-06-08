@@ -1,20 +1,13 @@
 import SwiftUI
 
-/// Settings — toggles grouped into sections (deck / briefing / rating /
-/// feeds). Most toggles are not yet wired to backend behavior — they persist
-/// to `@AppStorage` so the choices stick across launches.
+/// Settings — pared down to what's actually wired. The old deck / briefing /
+/// rating toggle banks were stripped in the refocus: they persisted to
+/// @AppStorage but were never read, and most pointed at features that no
+/// longer exist (ticker, audio briefing, re-rank). Toggles return as the
+/// behaviors behind them ship.
 struct SettingsView: View {
     @Environment(AuthService.self) private var auth
     @Environment(\.dismiss) private var dismiss
-
-    @AppStorage("settings.showTicker") private var showTicker: Bool = true
-    @AppStorage("settings.defaultToDeck") private var defaultToDeck: Bool = true
-    @AppStorage("settings.hideReadItems") private var hideReadItems: Bool = false
-    @AppStorage("settings.audioBriefing") private var audioBriefing: Bool = true
-    @AppStorage("settings.briefingNotify") private var briefingNotify: Bool = true
-    @AppStorage("settings.skipAlreadyRated") private var skipAlreadyRated: Bool = false
-    @AppStorage("settings.promptToRate") private var promptToRate: Bool = true
-    @AppStorage("settings.useRatingsRerank") private var useRatingsRerank: Bool = true
 
     @State private var showSignOutConfirm = false
 
@@ -23,31 +16,6 @@ struct SettingsView: View {
             PageBackground(atmosphere: .calm)
             ScrollView {
                 VStack(spacing: 0) {
-                    Section(title: "the deck") {
-                        Toggle("Show live ticker", isOn: $showTicker)
-                            .modifier(SettingsRow(sub: "Flashing headline strip at the top of the feed"))
-                        Toggle("Default to DECK", isOn: $defaultToDeck)
-                            .modifier(SettingsRow(sub: "Cards over list when you open the app"))
-                        Toggle("Hide read items", isOn: $hideReadItems)
-                            .modifier(SettingsRow(sub: "Compress completed cards out of the list view"))
-                    }
-
-                    Section(title: "briefing") {
-                        Toggle("Daily audio briefing", isOn: $audioBriefing)
-                            .modifier(SettingsRow(sub: "Generated at 06:30 from your ★ 4+ items"))
-                        Toggle("Notify when ready", isOn: $briefingNotify)
-                            .modifier(SettingsRow(sub: "One push at 06:30, never more"))
-                        Toggle("Skip already-rated", isOn: $skipAlreadyRated)
-                            .modifier(SettingsRow(sub: "Don't reuse items you've rated 4+"))
-                    }
-
-                    Section(title: "rating") {
-                        Toggle("Prompt to rate on read", isOn: $promptToRate)
-                            .modifier(SettingsRow(sub: "Star bar inline after marking read"))
-                        Toggle("Use ratings to re-rank", isOn: $useRatingsRerank)
-                            .modifier(SettingsRow(sub: "Tomorrow's deck favors sources you rate 4+"))
-                    }
-
                     Section(title: "account") {
                         Button {
                             showSignOutConfirm = true
@@ -112,59 +80,6 @@ private struct Section<Content: View>: View {
             .overlay(alignment: .bottom) { Theme.Color.stone200.frame(height: 1) }
 
             content
-        }
-    }
-}
-
-private struct SettingsRow: ViewModifier {
-    let sub: String?
-
-    init(sub: String? = nil) { self.sub = sub }
-
-    func body(content: Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            content
-                .toggleStyle(SettingsToggleStyle())
-                .font(Theme.Typography.body(14, weight: .medium))
-                .foregroundStyle(Theme.Color.ink)
-            if let sub {
-                Text(sub)
-                    .font(Theme.Typography.meta(10))
-                    .tracking(0.3)
-                    .foregroundStyle(Theme.Color.stone300)
-                    .padding(.trailing, 60)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .overlay(alignment: .bottom) {
-            Theme.Color.stone100.frame(height: 1)
-        }
-    }
-}
-
-/// Cobalt toggle that uses the same glow recipe as the progress bar when on.
-private struct SettingsToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack {
-            configuration.label
-            Spacer()
-            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                Capsule()
-                    .fill(configuration.isOn ? Theme.Color.accent : Theme.Color.stone200)
-                    .frame(width: 44, height: 26)
-                    .shadow(color: configuration.isOn ? Theme.Color.accent.opacity(0.7) : .clear, radius: configuration.isOn ? 5 : 0)
-                Circle()
-                    .fill(.white)
-                    .frame(width: 22, height: 22)
-                    .padding(2)
-                    .shadow(color: .black.opacity(0.20), radius: 1, y: 1)
-            }
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    configuration.isOn.toggle()
-                }
-            }
         }
     }
 }
