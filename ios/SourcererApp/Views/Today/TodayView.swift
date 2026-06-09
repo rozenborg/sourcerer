@@ -13,14 +13,11 @@ struct TodayView: View {
     @State private var isLoading = false
     @State private var path: [Article] = []
 
-    /// Generous ceiling on the query, not a UX cap. The real bound on the
-    /// deck's size is the time window below — the deck is the day's fresh
-    /// batch, so it has a natural, completable end.
+    /// Safety ceiling on the query, not a UX cap — at ~20 ingested/day it's
+    /// effectively never hit. The deck is naturally bounded by ingest volume
+    /// and by `feed_articles` hiding anything you've already triaged, so it
+    /// lands around a day's batch on its own without a hard time filter.
     private let fetchLimit = 250
-
-    /// The deck shows recently-fetched content rather than an unbounded
-    /// backlog. Tune this if days feel too sparse or too heavy.
-    private let deckWindow: TimeInterval = 48 * 3600
 
     /// How many cards ahead a postponed card reinserts — far enough that it
     /// isn't the very next thing you see, close enough to resurface this
@@ -103,8 +100,10 @@ struct TodayView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let since = Date().addingTimeInterval(-deckWindow)
-            let raw = try await env.articles.listFeed(beforeFetchedAt: nil, since: since, limit: fetchLimit)
+            // No hard time filter — pass nil. The `since:` plumbing stays for
+            // a future "since I last cleared" bound, which needs persisted
+            // session state we don't have yet.
+            let raw = try await env.articles.listFeed(beforeFetchedAt: nil, since: nil, limit: fetchLimit)
             articles = Self.interleaveBySource(raw)
             clearedIds.removeAll()
             loadError = nil
