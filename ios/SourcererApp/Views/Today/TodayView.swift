@@ -44,6 +44,10 @@ struct TodayView: View {
 
                     content
                 }
+                // Fill the height and pin to the top so the masthead sits at
+                // the same height in DECK and LIST mode. Without this the ZStack
+                // centers the (shorter) deck column and the header drifts down.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                 if isLoading && articles.isEmpty {
                     ProgressView().tint(Theme.Color.accent)
