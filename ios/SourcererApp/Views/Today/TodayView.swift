@@ -148,7 +148,22 @@ struct TodayView: View {
             loadError = nil
             await seedVerdicts()
         } catch {
-            loadError = error.localizedDescription
+            surface(error)
+        }
+    }
+
+    /// Show an error to the user — but ignore task cancellations, which are
+    /// expected when a request is superseded by navigation or a re-render
+    /// (they aren't real failures). Auto-dismiss so a transient error can't
+    /// linger on screen.
+    private func surface(_ error: Error) {
+        if error is CancellationError { return }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return }
+        let message = error.localizedDescription
+        withAnimation { loadError = message }
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if loadError == message { withAnimation { loadError = nil } }
         }
     }
 
@@ -200,13 +215,13 @@ struct TodayView: View {
     private func skip(_ article: Article) async {
         markCleared(article.id)
         do { try await env.interactions.setAction(.pass, articleId: article.id) }
-        catch { loadError = error.localizedDescription }
+        catch { surface(error) }
     }
 
     private func save(_ article: Article) async {
         markCleared(article.id)
         do { try await env.interactions.setAction(.save, articleId: article.id) }
-        catch { loadError = error.localizedDescription }
+        catch { surface(error) }
     }
 
     /// A thumb tap on the card: reflect it on the card immediately, persist the
@@ -218,7 +233,7 @@ struct TodayView: View {
         feedbackArticle = article
         Task {
             do { try await env.ratings.setVerdict(articleId: article.id, verdict: verdict.rawValue) }
-            catch { withAnimation { loadError = error.localizedDescription } }
+            catch { surface(error) }
         }
     }
 
@@ -227,7 +242,7 @@ struct TodayView: View {
     private func saveFeedback(_ article: Article, _ verdict: Verdict, _ comment: String?) async {
         sessionVerdicts[article.id] = verdict
         do { try await env.ratings.setFeedback(articleId: article.id, verdict: verdict.rawValue, comment: comment) }
-        catch { withAnimation { loadError = error.localizedDescription } }
+        catch { surface(error) }
     }
 
     /// Move the card ~`postponeDepth` *visible* cards deeper in the deck.
