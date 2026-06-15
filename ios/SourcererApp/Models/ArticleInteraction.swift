@@ -21,26 +21,40 @@ struct ArticleInteraction: Codable, Hashable {
     var isUnseen: Bool { passedAt == nil && starredAt == nil && savedAt == nil }
 }
 
-/// A considered rating: 1–5 stars + an optional open-form note. Captured from
-/// the detail view and persisted to `article_ratings`. `reasons` is reserved
-/// for the future "unlock" (notes → personalized chips) and stays empty today.
+/// A reaction to a piece: a three-level thumbs `verdict` + an optional
+/// open-form `note` (the comment). Persisted to `article_ratings`. The verdict
+/// is the quick signal; the comment is the rich feedback we collect to
+/// personalize the feed. `stars` is legacy (pre-thumbs ratings), read-only.
 struct ArticleRating: Codable, Hashable {
     let articleId: Int64
-    var stars: Int
+    var verdict: String?
     var note: String?
-    var reasons: [String]
-
-    init(articleId: Int64, stars: Int, note: String? = nil, reasons: [String] = []) {
-        self.articleId = articleId
-        self.stars = stars
-        self.note = note
-        self.reasons = reasons
-    }
+    var stars: Int?
 
     enum CodingKeys: String, CodingKey {
         case articleId = "article_id"
-        case stars
+        case verdict
         case note
-        case reasons
+        case stars
+    }
+
+    /// The typed verdict, if set and recognized.
+    var verdictValue: Verdict? { verdict.flatMap(Verdict.init(rawValue:)) }
+}
+
+/// Three-level reaction: 👎 · 👍 · 👍👍. Raw values match the DB check
+/// constraint on `article_ratings.verdict`.
+enum Verdict: String, CaseIterable, Codable {
+    case down = "down"
+    case up = "up"
+    case upUp = "up_up"
+
+    /// Short phrase shown when a verdict is selected.
+    var phrase: String {
+        switch self {
+        case .down: return "not for me"
+        case .up:   return "worth it"
+        case .upUp: return "loved it"
+        }
     }
 }

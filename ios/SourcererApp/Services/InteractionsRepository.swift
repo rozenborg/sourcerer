@@ -93,12 +93,25 @@ final class SupabaseInteractionsRepository: InteractionsRepository {
 
 // MARK: - Ratings
 
-/// The considered rating signal (stars + note), separate from the fast triage
-/// interactions. Written from the detail view; persisted to `article_ratings`.
+/// The considered reaction signal (verdict + comment), separate from the fast
+/// triage interactions. Written from the deck card and the detail view;
+/// persisted to `article_ratings`.
 protocol RatingsRepository {
-    /// Upsert the current user's rating for an article. Re-rating overwrites.
-    func setRating(articleId: Int64, stars: Int, note: String?) async throws
+    /// Quick thumb-tap: upsert just the verdict. The `note` column is omitted
+    /// from the payload, so a quick re-tap never erases a comment written
+    /// earlier (PostgREST leaves omitted columns untouched on upsert-update).
+    func setVerdict(articleId: Int64, verdict: String) async throws
+
+    /// Full feedback from the sheet: upsert verdict AND the comment. The comment
+    /// is always written (a cleared comment becomes an empty string), so the
+    /// sheet can remove a comment the user no longer wants.
+    func setFeedback(articleId: Int64, verdict: String, comment: String?) async throws
+
     func rating(for articleId: Int64) async throws -> ArticleRating?
+
+    /// Batch-load existing verdicts for a set of articles, so the deck can
+    /// reflect what the user already rated. Returns articleId → verdict raw.
+    func verdicts(forArticleIds ids: [Int64]) async throws -> [Int64: String]
 }
 
 final class SupabaseRatingsRepository: RatingsRepository {
@@ -110,20 +123,42 @@ final class SupabaseRatingsRepository: RatingsRepository {
         self.userId = userId
     }
 
-    func setRating(articleId: Int64, stars: Int, note: String?) async throws {
+    func setVerdict(articleId: Int64, verdict: String) async throws {
         guard let uid = userId() else { throw AuthRequired() }
         let now = ISO8601DateFormatter().string(from: Date())
 
+        // No `note` field at all → it's absent from the upsert body, so on
+        // ON CONFLICT DO UPDATE PostgREST never touches the column (a quick
+        // re-tap preserves any existing comment), and on insert it defaults to
+        // NULL. `stars` is likewise untouched, preserving legacy ratings.
         struct Row: Encodable {
             let user_id: UUID
             let article_id: Int64
-            let stars: Int
-            let note: String?
+            let verdict: String
             let rated_at: String
         }
-        // `reasons` is omitted so the column keeps its '{}' default (reserved
-        // for the future unlock). encodeIfPresent leaves `note` nil → SQL NULL.
-        let row = Row(user_id: uid, article_id: articleId, stars: stars, note: note, rated_at: now)
+        let row = Row(user_id: uid, article_id: articleId, verdict: verdict, rated_at: now)
+        try await client
+            .from("article_ratings")
+            .upsert(row, onConflict: "user_id,article_id")
+            .execute()
+    }
+
+    func setFeedback(articleId: Int64, verdict: String, comment: String?) async throws {
+        guard let uid = userId() else { throw AuthRequired() }
+        let now = ISO8601DateFormatter().string(from: Date())
+
+        // `note` is ALWAYS present here (a cleared comment becomes ""), so the
+        // sheet can overwrite or remove a comment. This is the deliberate-edit
+        // path; the quick-tap `setVerdict` above is the preserve path.
+        struct Row: Encodable {
+            let user_id: UUID
+            let article_id: Int64
+            let verdict: String
+            let note: String
+            let rated_at: String
+        }
+        let row = Row(user_id: uid, article_id: articleId, verdict: verdict, note: comment ?? "", rated_at: now)
         try await client
             .from("article_ratings")
             .upsert(row, onConflict: "user_id,article_id")
@@ -134,13 +169,30 @@ final class SupabaseRatingsRepository: RatingsRepository {
         guard let uid = userId() else { return nil }
         let rows: [ArticleRating] = try await client
             .from("article_ratings")
-            .select("article_id, stars, note, reasons")
+            .select("article_id, verdict, note, stars")
             .eq("user_id", value: uid)
             .eq("article_id", value: Int(articleId))
             .limit(1)
             .execute()
             .value
         return rows.first
+    }
+
+    func verdicts(forArticleIds ids: [Int64]) async throws -> [Int64: String] {
+        guard let uid = userId(), !ids.isEmpty else { return [:] }
+        struct Row: Decodable { let article_id: Int64; let verdict: String? }
+        let rows: [Row] = try await client
+            .from("article_ratings")
+            .select("article_id, verdict")
+            .eq("user_id", value: uid)
+            .in("article_id", values: ids.map { Int($0) })
+            .execute()
+            .value
+        var map: [Int64: String] = [:]
+        for row in rows {
+            if let v = row.verdict { map[row.article_id] = v }
+        }
+        return map
     }
 }
 

@@ -12,6 +12,11 @@ struct TodayView: View {
     @State private var loadError: String?
     @State private var isLoading = false
     @State private var path: [Article] = []
+    @State private var feedbackArticle: Article? = nil
+    /// Verdicts for cards in this session — the single source of truth for the
+    /// card footer highlight. Seeded from the DB on load, updated on every
+    /// thumb tap and sheet save so the card never diverges from what's stored.
+    @State private var sessionVerdicts: [Int64: Verdict] = [:]
 
     /// Safety ceiling on the query, not a UX cap — at ~20 ingested/day it's
     /// effectively never hit. The deck is naturally bounded by ingest volume
@@ -50,6 +55,25 @@ struct TodayView: View {
             }
             .task { if articles.isEmpty { await refresh() } }
             .refreshable { await refresh() }
+            .sheet(item: $feedbackArticle) { article in
+                FeedbackSheet(article: article, initialVerdict: sessionVerdicts[article.id]) { verdict, comment in
+                    Task { await saveFeedback(article, verdict, comment) }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+            .overlay(alignment: .bottom) {
+                if let loadError {
+                    Text(loadError)
+                        .font(Theme.Typography.meta(11))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.red.opacity(0.9), in: Capsule())
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
         }
     }
 
@@ -75,7 +99,8 @@ struct TodayView: View {
                         onSave: { article in Task { await save(article) } },
                         onPostpone: { article in postpone(article) },
                         onOpen: { article in path.append(article) },
-                        onRate: { article, stars in Task { await quickRate(article, stars: stars) } }
+                        onVerdict: { article, verdict in handleVerdict(article, verdict) },
+                        verdictFor: { article in sessionVerdicts[article.id] }
                     )
         case .list:  TodayListMode(
                         articles: visibleDeckArticles,
@@ -95,6 +120,19 @@ struct TodayView: View {
         return .unread
     }
 
+    /// Load any verdicts the user already gave these articles (prior session,
+    /// or via the detail view), so the card footer thumbs reflect them.
+    private func seedVerdicts() async {
+        do {
+            let raw = try await env.ratings.verdicts(forArticleIds: articles.map(\.id))
+            sessionVerdicts = raw.reduce(into: [:]) { acc, pair in
+                if let v = Verdict(rawValue: pair.value) { acc[pair.key] = v }
+            }
+        } catch {
+            // Non-fatal: the deck just won't show pre-existing verdicts.
+        }
+    }
+
     // MARK: - Data
 
     private func refresh() async {
@@ -108,6 +146,7 @@ struct TodayView: View {
             articles = Self.interleaveBySource(raw)
             clearedIds.removeAll()
             loadError = nil
+            await seedVerdicts()
         } catch {
             loadError = error.localizedDescription
         }
@@ -170,13 +209,25 @@ struct TodayView: View {
         catch { loadError = error.localizedDescription }
     }
 
-    /// Quick star rating from the card footer — persists to article_ratings
-    /// (no note; the detail view's RatingSheet is where notes are added). This
-    /// is pure tuning signal; it does NOT clear the card from the deck.
-    private func quickRate(_ article: Article, stars: Int) async {
-        guard stars > 0 else { return }
-        do { try await env.ratings.setRating(articleId: article.id, stars: stars, note: nil) }
-        catch { loadError = error.localizedDescription }
+    /// A thumb tap on the card: reflect it on the card immediately, persist the
+    /// verdict (the thumb IS the rating), then open the feedback sheet to
+    /// optionally attach a comment. Rating is pure tuning signal — it does NOT
+    /// clear the card from the deck.
+    private func handleVerdict(_ article: Article, _ verdict: Verdict) {
+        sessionVerdicts[article.id] = verdict
+        feedbackArticle = article
+        Task {
+            do { try await env.ratings.setVerdict(articleId: article.id, verdict: verdict.rawValue) }
+            catch { withAnimation { loadError = error.localizedDescription } }
+        }
+    }
+
+    /// Sheet save: write verdict + comment (the comment can be cleared here),
+    /// and keep the card highlight in sync with the (possibly changed) verdict.
+    private func saveFeedback(_ article: Article, _ verdict: Verdict, _ comment: String?) async {
+        sessionVerdicts[article.id] = verdict
+        do { try await env.ratings.setFeedback(articleId: article.id, verdict: verdict.rawValue, comment: comment) }
+        catch { withAnimation { loadError = error.localizedDescription } }
     }
 
     /// Move the card ~`postponeDepth` *visible* cards deeper in the deck.

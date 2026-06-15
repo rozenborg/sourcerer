@@ -367,8 +367,9 @@ rows are reusable; everything composes from the same primitives.
 - `[?]` Theme.Typography scales (display / serif / body / meta).
 - `[?]` Theme.Color palette (stone / ink / accent / sage).
 - `[?]` Components: TopicChip, OrbView, BriefingOrb (auth screen),
-  SparkStars, StatusPill, DeckCard, ListRowCard, PageMasthead, ModeToggle.
-  (TickerBar and StreakRibbon were removed in the refocus.)
+  VerdictPicker (thumbs rating), StatusPill, DeckCard, ListRowCard,
+  PageMasthead, ModeToggle. (TickerBar, StreakRibbon, and the SparkStars
+  1–5 star control were removed in the refocus.)
 
 **Disposition.** Triage from the iOS surfaces above — if a typography or
 spacing bug shows up in multiple tabs, fix at the component level here

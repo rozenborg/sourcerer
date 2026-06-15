@@ -17,12 +17,16 @@ struct DeckPileView: View {
 
     let onSkip: (Article) -> Void            // ← not for me
     let onSave: (Article) -> Void            // → keep it
-    let onPostpone: (Article) -> Void        // footer "Later" (reshuffle deeper)
+    let onPostpone: (Article) -> Void        // top-right "Later" (reshuffle deeper)
     let onOpen: (Article) -> Void            // tap title → focused detail
-    let onRate: (Article, Int) -> Void       // footer stars → quick rate
+    let onVerdict: (Article, Verdict) -> Void   // footer thumbs → feedback
+    let verdictFor: (Article) -> Verdict?    // persisted verdict for the card
 
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
+    /// Axis latched on the first significant move of a drag, so a curving pan
+    /// can't flip between scrolling and swiping mid-gesture. nil = undecided.
+    @State private var dragIsHorizontal: Bool? = nil
 
     private let flickX: CGFloat = 110
 
@@ -31,15 +35,24 @@ struct DeckPileView: View {
             emptyDoneState
         } else {
             VStack(spacing: 0) {
+                plateLabel
+                    .padding(.bottom, 10)
                 pile
-                gestureHints
-                    .padding(.horizontal, 26)
-                    .padding(.top, 14)
-                    .padding(.bottom, 14)
             }
             .padding(.horizontal, 26)
-            .padding(.top, 18)
+            .padding(.top, 14)
         }
+    }
+
+    /// The deck-order number, now outside the card (above the pile). `articles`
+    /// here is the *remaining* (uncleared) deck and `total` is the full count,
+    /// so progress is (cleared so far) + 1 = total - remaining + 1.
+    private var plateLabel: some View {
+        let idx = max(1, total - articles.count + 1)
+        return Text(String(format: "no. %02d / %02d", idx, total))
+            .font(Theme.Typography.meta(10))
+            .tracking(0.6)
+            .foregroundStyle(Theme.Color.stone300)
     }
 
     private var pile: some View {
@@ -53,11 +66,10 @@ struct DeckPileView: View {
 
                 DeckCard(
                     article: article,
-                    index: indexInDeck(article),
-                    total: total,
+                    selectedVerdict: verdictFor(article),
                     onOpen: { onOpen(article) },
                     onPostpone: { triggerPostpone(article: article) },
-                    onRate: { stars in onRate(article, stars) }
+                    onVerdict: { v in onVerdict(article, v) }
                 )
                 .scaleEffect(scale(forDepth: depth))
                 .rotationEffect(rotation(forDepth: depth, isTop: isTop), anchor: .bottom)
@@ -80,11 +92,21 @@ struct DeckPileView: View {
     private func horizontalSwipe(article: Article) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { v in
-                guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                // Latch the axis on the first significant sample; keep it for
+                // the rest of the gesture so a curving pan can't switch modes.
+                if dragIsHorizontal == nil {
+                    dragIsHorizontal = abs(v.translation.width) > abs(v.translation.height)
+                }
+                guard dragIsHorizontal == true else { return }
                 dragOffset = CGSize(width: v.translation.width, height: 0)
                 dragRotation = Double(v.translation.width / 14)
             }
-            .onEnded { v in handleDragEnd(v, article: article) }
+            .onEnded { v in
+                let wasHorizontal = dragIsHorizontal == true
+                dragIsHorizontal = nil
+                guard wasHorizontal else { return }
+                handleDragEnd(v, article: article)
+            }
     }
 
     private var emptyDoneState: some View {
@@ -234,34 +256,5 @@ struct DeckPileView: View {
     private func resetDrag() {
         dragOffset = .zero
         dragRotation = 0
-    }
-
-    // MARK: - Gesture hints
-
-    private var gestureHints: some View {
-        HStack {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.left")
-                Text("skip").tracking(0.6)
-            }
-            .foregroundStyle(Theme.Color.stone300)
-
-            Spacer()
-
-            Text("scroll to read · rate, save for later, or share below")
-                .tracking(0.3)
-                .foregroundStyle(Theme.Color.stone300)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            Spacer()
-
-            HStack(spacing: 6) {
-                Text("save").tracking(0.6)
-                Image(systemName: "arrow.right")
-            }
-            .foregroundStyle(Theme.Color.sage)
-        }
-        .font(Theme.Typography.meta(10))
     }
 }

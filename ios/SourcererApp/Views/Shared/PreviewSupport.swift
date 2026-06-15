@@ -41,8 +41,10 @@ final class PreviewInteractionsRepository: InteractionsRepository {
 }
 
 final class PreviewRatingsRepository: RatingsRepository {
-    func setRating(articleId: Int64, stars: Int, note: String?) async throws {}
+    func setVerdict(articleId: Int64, verdict: String) async throws {}
+    func setFeedback(articleId: Int64, verdict: String, comment: String?) async throws {}
     func rating(for articleId: Int64) async throws -> ArticleRating? { nil }
+    func verdicts(forArticleIds ids: [Int64]) async throws -> [Int64: String] { [:] }
 }
 
 @MainActor

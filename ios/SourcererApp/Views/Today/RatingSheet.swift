@@ -1,68 +1,71 @@
 import SwiftUI
 
-/// Rate a piece you've engaged with: stars + an open-form note. Persisted to
-/// `article_ratings`.
+/// Capture a reaction to a piece: a thumbs verdict + an optional comment.
+/// The comment is the point — it's how Sourcerer learns what to show you — so
+/// the sheet leads with the prompt. Persisted to `article_ratings`.
 ///
-/// Preset reason chips were intentionally removed — the old set was guessed up
-/// front and didn't match how the user actually thinks. The plan is to let
-/// reason chips *emerge* from real notes later (the "unlock"); until then the
-/// note field is where the signal lives.
-struct RatingSheet: View {
+/// Opened from the deck card (with the tapped thumb pre-selected) and from the
+/// detail view (no pre-selection). Either way, submitting writes the verdict
+/// and comment via `RatingsRepository`.
+struct FeedbackSheet: View {
     let article: Article
-    /// Existing rating, if the user has rated this before (pre-fills the sheet).
-    var existing: ArticleRating? = nil
-    /// Caller persists the rating.
-    let onSubmit: (_ stars: Int, _ note: String?) -> Void
+    var initialVerdict: Verdict? = nil
+    var existingComment: String? = nil
+    let onSubmit: (_ verdict: Verdict, _ comment: String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var stars: Int = 0
-    @State private var note: String = ""
+    @State private var verdict: Verdict?
+    @State private var comment: String = ""
+    @State private var didSubmit = false
 
     var body: some View {
         ZStack {
             PageBackground(atmosphere: .calm)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    label("rate this")
+                    label("your take")
                     Text(article.title ?? "Untitled")
                         .font(Theme.Typography.display(20))
                         .kerning(-0.2)
                         .foregroundStyle(Theme.Color.ink)
 
-                    starsCard
-                    noteBlock
+                    verdictCard
+                    commentBlock
                 }
-                .padding(EdgeInsets(top: 18, leading: 22, bottom: 24, trailing: 22))
+                .padding(EdgeInsets(top: 18, leading: 22, bottom: 120, trailing: 22))
             }
 
             VStack {
                 Spacer()
-                ctaBar
+                cta
                     .padding(.horizontal, 22)
                     .padding(.bottom, 14)
             }
         }
         .onAppear {
-            if let existing {
-                stars = existing.stars
-                note = existing.note ?? ""
+            verdict = initialVerdict
+            comment = existingComment ?? ""
+        }
+        .onDisappear {
+            // Drag-to-dismiss without tapping SAVE would otherwise drop a typed
+            // comment. Flush it (once) if a verdict is set.
+            if !didSubmit, let v = verdict {
+                onSubmit(v, comment.isEmpty ? nil : comment)
             }
         }
     }
 
-    private var starsCard: some View {
+    private var verdictCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            label("stars")
+            label("reaction")
             HStack {
-                SparkStars(filled: stars, size: 30) { tapped in
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                        stars = tapped == stars ? 0 : tapped
-                    }
+                VerdictPicker(selected: verdict, size: 28) { v in
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { verdict = v }
                 }
                 Spacer()
-                if stars > 0 {
-                    Text(starsPhrase)
+                if let v = verdict {
+                    Text(v.phrase)
                         .font(Theme.Typography.serif(16).italic())
                         .foregroundStyle(Theme.Color.accent)
                 }
@@ -77,34 +80,23 @@ struct RatingSheet: View {
         )
     }
 
-    private var starsPhrase: String {
-        switch stars {
-        case 1: return "skip"
-        case 2: return "meh"
-        case 3: return "decent"
-        case 4: return "worth it"
-        case 5: return "essential"
-        default: return ""
-        }
-    }
-
-    private var noteBlock: some View {
+    private var commentBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            label("note · optional")
+            label("comment · helps personalize your feed")
             ZStack(alignment: .topLeading) {
-                if note.isEmpty {
-                    Text("What stood out? Why this rating? Write it however you think about it.")
+                if comment.isEmpty {
+                    Text("What landed, what didn't, what you'd want more or less of…")
                         .font(Theme.Typography.serif(14).italic())
                         .foregroundStyle(Theme.Color.stone300)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 6)
                         .allowsHitTesting(false)
                 }
-                TextEditor(text: $note)
+                TextEditor(text: $comment)
                     .font(Theme.Typography.serif(14).italic())
                     .foregroundStyle(Theme.Color.ink)
                     .scrollContentBackground(.hidden)
-                    .frame(minHeight: 100)
+                    .frame(minHeight: 120)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -116,22 +108,26 @@ struct RatingSheet: View {
         }
     }
 
-    private var ctaBar: some View {
+    private var cta: some View {
         Button {
-            onSubmit(stars, note.isEmpty ? nil : note)
+            if let v = verdict {
+                didSubmit = true
+                onSubmit(v, comment.isEmpty ? nil : comment)
+            }
             dismiss()
         } label: {
-            Text(stars > 0 ? "SAVE RATING" : "CLOSE")
+            Text(verdict == nil ? "PICK A REACTION" : "SAVE")
                 .font(Theme.Typography.meta(10, weight: .bold))
                 .tracking(0.8)
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(stars > 0 ? Theme.Color.accent : Theme.Color.stone300,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .modifier(CtaGlow(active: stars > 0))
+                .background(
+                    verdict == nil ? Theme.Color.stone300 : Theme.Color.accent,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
         }
-        .disabled(stars == 0 && note.isEmpty)
+        .disabled(verdict == nil)
     }
 
     private func label(_ s: String) -> some View {
@@ -142,15 +138,58 @@ struct RatingSheet: View {
     }
 }
 
-private struct CtaGlow: ViewModifier {
-    var active: Bool = true
-    func body(content: Content) -> some View {
-        if active {
-            content
-                .shadow(color: Theme.Color.accent.opacity(0.32), radius: 12)
-                .shadow(color: Color.black.opacity(0.18), radius: 7, y: 4)
-        } else {
-            content
+/// The three-level thumbs control: 👎 · 👍 · 👍👍. Reused on the card footer
+/// (small) and in the feedback sheet (large).
+struct VerdictPicker: View {
+    var selected: Verdict?
+    var size: CGFloat = 22
+    var onSelect: (Verdict) -> Void
+
+    var body: some View {
+        HStack(spacing: size * 0.6) {
+            thumb(.down)
+            thumb(.up)
+            thumb(.upUp)
+        }
+    }
+
+    @ViewBuilder
+    private func thumb(_ v: Verdict) -> some View {
+        let on = selected == v
+        Button { onSelect(v) } label: {
+            glyph(v)
+                .font(.system(size: size, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? tint(v) : Theme.Color.stone300)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(
+                    on ? tint(v).opacity(0.14) : .clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func glyph(_ v: Verdict) -> some View {
+        switch v {
+        case .down:
+            Image(systemName: "hand.thumbsdown")
+        case .up:
+            Image(systemName: "hand.thumbsup")
+        case .upUp:
+            HStack(spacing: -size * 0.16) {
+                Image(systemName: "hand.thumbsup")
+                Image(systemName: "hand.thumbsup")
+            }
+        }
+    }
+
+    private func tint(_ v: Verdict) -> Color {
+        switch v {
+        case .down: return Theme.Color.ink
+        case .up:   return Theme.Color.sage
+        case .upUp: return Theme.Color.accent
         }
     }
 }

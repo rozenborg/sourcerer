@@ -16,6 +16,10 @@ struct ArticleDetailView: View {
 
     private var parsed: ParsedSummary { ParsedSummary.parse(article.summary) }
 
+    /// Rated if there's a thumbs verdict OR a legacy star rating (the migration
+    /// preserves pre-thumbs stars; treat them as "rated" so they're not hidden).
+    private var isRated: Bool { rating?.verdict != nil || rating?.stars != nil }
+
     var body: some View {
         ZStack {
             PageBackground(atmosphere: .calm)
@@ -126,8 +130,8 @@ struct ArticleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadState() }
         .sheet(isPresented: $showRatingSheet) {
-            RatingSheet(article: article, existing: rating) { stars, note in
-                Task { await applyRating(stars: stars, note: note) }
+            FeedbackSheet(article: article, initialVerdict: rating?.verdictValue, existingComment: rating?.note) { verdict, comment in
+                Task { await applyVerdict(verdict, comment) }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -146,7 +150,7 @@ struct ArticleDetailView: View {
             actionButton("Skip", icon: "xmark", on: interaction?.isPassed == true, tint: Theme.Color.stone300) {
                 Task { await toggle(.pass) }
             }
-            actionButton(rating == nil ? "Rate" : "Rated", icon: "star", on: rating != nil, tint: Theme.Color.accent) {
+            actionButton(isRated ? "Rated" : "Rate", icon: "hand.thumbsup", on: isRated, tint: Theme.Color.accent) {
                 showRatingSheet = true
             }
             actionButton("Save", icon: "bookmark", on: interaction?.isSaved == true, tint: Theme.Color.sage) {
@@ -205,13 +209,12 @@ struct ArticleDetailView: View {
         }
     }
 
-    /// Persist stars + note to `article_ratings` — the considered signal. This
-    /// is pure feed-tuning data for now; it doesn't touch the triage
-    /// interactions (skip/save) or clear the piece from anywhere.
-    private func applyRating(stars: Int, note: String?) async {
-        guard stars > 0 else { return }
+    /// Persist a verdict + comment to `article_ratings` — the considered
+    /// signal. Pure feed-tuning data; it doesn't touch the triage interactions
+    /// (skip/save) or clear the piece from anywhere.
+    private func applyVerdict(_ verdict: Verdict, _ comment: String?) async {
         do {
-            try await env.ratings.setRating(articleId: article.id, stars: stars, note: note)
+            try await env.ratings.setFeedback(articleId: article.id, verdict: verdict.rawValue, comment: comment)
             await loadState()
         } catch {
             actionError = error.localizedDescription
