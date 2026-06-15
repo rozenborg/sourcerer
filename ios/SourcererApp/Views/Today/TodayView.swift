@@ -84,11 +84,25 @@ struct TodayView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .lastTextBaseline) {
+        HStack(alignment: .top) {
             PageMasthead(title: "today's deck", dayOfWeek: nil, inboundCount: total)
             Spacer()
-            ModeToggle(mode: $mode)
+            VStack(alignment: .trailing, spacing: 6) {
+                if total > 0 {
+                    Text(String(format: "no. %02d / %02d", deckIndex, total))
+                        .font(Theme.Typography.meta(10))
+                        .tracking(0.6)
+                        .foregroundStyle(Theme.Color.stone300)
+                        .monospacedDigit()
+                }
+                ModeToggle(mode: $mode)
+            }
         }
+    }
+
+    /// Current position in the deck: (cleared so far) + 1, clamped to the deck.
+    private var deckIndex: Int {
+        max(1, min(total, total - visibleDeckArticles.count + 1))
     }
 
     // MARK: - Content

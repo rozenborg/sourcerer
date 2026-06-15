@@ -34,25 +34,10 @@ struct DeckPileView: View {
         if articles.isEmpty {
             emptyDoneState
         } else {
-            VStack(spacing: 0) {
-                plateLabel
-                    .padding(.bottom, 10)
-                pile
-            }
-            .padding(.horizontal, 26)
-            .padding(.top, 14)
+            pile
+                .padding(.horizontal, 26)
+                .padding(.top, 14)
         }
-    }
-
-    /// The deck-order number, now outside the card (above the pile). `articles`
-    /// here is the *remaining* (uncleared) deck and `total` is the full count,
-    /// so progress is (cleared so far) + 1 = total - remaining + 1.
-    private var plateLabel: some View {
-        let idx = max(1, total - articles.count + 1)
-        return Text(String(format: "no. %02d / %02d", idx, total))
-            .font(Theme.Typography.meta(10))
-            .tracking(0.6)
-            .foregroundStyle(Theme.Color.stone300)
     }
 
     private var pile: some View {
@@ -159,10 +144,6 @@ struct DeckPileView: View {
         case 1: return 0.85
         default: return 0.55
         }
-    }
-
-    private func indexInDeck(_ article: Article) -> Int {
-        (articles.firstIndex(where: { $0.id == article.id }) ?? 0) + 1
     }
 
     // MARK: - Swipe intent overlay
