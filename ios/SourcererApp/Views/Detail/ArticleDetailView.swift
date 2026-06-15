@@ -92,6 +92,27 @@ struct ArticleDetailView: View {
                     }
                     .buttonStyle(.plain)
 
+                    // Hand off to an LLM app (Claude, etc.) via the system
+                    // share sheet, pre-loaded with a framing line + the URL.
+                    // No backend, no stored text — the receiving app fetches
+                    // the piece itself.
+                    ShareLink(item: "I'm going to ask you questions about this content: \(article.url)") {
+                        HStack {
+                            Image(systemName: "text.bubble")
+                            Text("Discuss in Claude")
+                                .font(Theme.Typography.meta(11, weight: .bold))
+                                .tracking(0.6)
+                        }
+                        .foregroundStyle(Theme.Color.ink)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Theme.Color.ink, lineWidth: 1.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     if let actionError {
                         Text(actionError)
                             .font(Theme.Typography.body(12))
