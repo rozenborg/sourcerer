@@ -74,7 +74,8 @@ struct TodayView: View {
                         onSkip: { article in Task { await skip(article) } },
                         onSave: { article in Task { await save(article) } },
                         onPostpone: { article in postpone(article) },
-                        onOpen: { article in path.append(article) }
+                        onOpen: { article in path.append(article) },
+                        onRate: { article, stars in Task { await quickRate(article, stars: stars) } }
                     )
         case .list:  TodayListMode(
                         articles: visibleDeckArticles,
@@ -166,6 +167,15 @@ struct TodayView: View {
     private func save(_ article: Article) async {
         markCleared(article.id)
         do { try await env.interactions.setAction(.save, articleId: article.id) }
+        catch { loadError = error.localizedDescription }
+    }
+
+    /// Quick star rating from the card footer — persists to article_ratings
+    /// (no note; the detail view's RatingSheet is where notes are added). This
+    /// is pure tuning signal; it does NOT clear the card from the deck.
+    private func quickRate(_ article: Article, stars: Int) async {
+        guard stars > 0 else { return }
+        do { try await env.ratings.setRating(articleId: article.id, stars: stars, note: nil) }
         catch { loadError = error.localizedDescription }
     }
 

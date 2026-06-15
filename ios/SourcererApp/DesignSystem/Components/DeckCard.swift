@@ -1,181 +1,168 @@
 import SwiftUI
 
-/// The article card — the unit of content in DECK mode.
-/// Solid topic chip = personality. Indigo frame when `promoted` (saved).
+/// The article card — now a self-contained reader. Header (topic + title) →
+/// scrollable middle (lead + full in-depth summary) → footer (rate · later ·
+/// share). Tapping the title opens the focused detail view, but it's optional:
+/// everything you need to triage and engage lives on the card.
+///
+/// Gesture split (see DeckPileView): the middle ScrollView owns vertical pans
+/// (reading); the card owns horizontal pans (← skip / → save). Postpone moved
+/// off the swipe and onto the footer "Later" button.
 struct DeckCard: View {
     let article: Article
     /// 1-based ordinal in today's deck (the "no. 04 / 18" plate number).
     let index: Int
     /// Total cards in today's deck.
     let total: Int
-    var promoted: Bool = false
+
+    var onOpen: () -> Void = {}        // tap title → focused detail
+    var onPostpone: () -> Void = {}    // footer "Later"
+    var onRate: (Int) -> Void = { _ in }   // footer stars → quick rate (persists)
+
+    @State private var ratedStars: Int = 0
 
     private var parsed: ParsedSummary { ParsedSummary.parse(article.summary) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                TopicChip(topic: article.topic)
-                if promoted {
-                    Text("★ SAVED")
-                        .font(Theme.Typography.meta(9, weight: .bold))
-                        .tracking(1)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Theme.Color.accent, in: Capsule())
-                }
-                Spacer()
-                Text(plateNumber)
-                    .font(Theme.Typography.meta(10))
-                    .tracking(0.6)
-                    .foregroundStyle(Theme.Color.stone300)
-            }
-
-            Text(article.title ?? "Untitled")
-                .font(Theme.Typography.display(24))
-                .kerning(-0.4)
-                .lineSpacing(1)
-                .foregroundStyle(Theme.Color.ink)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if !deckText.isEmpty {
-                Text(deckText)
-                    .font(Theme.Typography.body(14.5))
-                    .foregroundStyle(Theme.Color.inkSoft)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineLimit(promoted ? 3 : 5)
-            }
-
-            if promoted {
-                youSaidCallout
-            }
-
-            Spacer(minLength: 0)
-
-            HStack(alignment: .center) {
-                Text(metaLine)
-                    .font(Theme.Typography.meta(10))
-                    .tracking(0.4)
-                    .foregroundStyle(Theme.Color.stone300)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Spacer()
-                if let author = parsed.prefixTag, !author.isEmpty {
-                    Text(author)
-                        .font(Theme.Typography.serif(12).italic())
-                        .foregroundStyle(Theme.Color.inkSoft)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.top, 12)
-            .overlay(alignment: .top) {
-                Theme.Color.stone100.frame(height: 1)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            titleBlock
+            Theme.Color.stone200.frame(height: 1)
+            readerBody
+            Theme.Color.stone200.frame(height: 1)
+            footer
         }
-        .padding(EdgeInsets(top: 22, leading: 22, bottom: 18, trailing: 22))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(
             ZStack {
                 Theme.Color.stone0
-                MineralHatch()
-                    .opacity(0.018)
+                MineralHatch().opacity(0.018)
             }
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(promoted ? Theme.Color.accent : Theme.Color.stone200, lineWidth: 1)
+                .stroke(Theme.Color.stone200, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .modifier(DeckCardShadow(promoted: promoted))
+        .shadow(color: Color.black.opacity(0.20), radius: 13, y: 6)
     }
 
-    /// Text under the title in deck mode.
-    ///
-    /// Prefers `cardTeaser` — the Haiku presentation pass output, purpose-
-    /// built for this slot. Falls back to deriving a line from the rich
-    /// summary during the backfill window or when the presentation pass
-    /// failed. The fallback path is what kept the deck readable while
-    /// summaries were still the old HEADLINE+bullets shape.
-    private var deckText: String {
-        if let teaser = article.cardTeaser?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !teaser.isEmpty {
-            return teaser
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            TopicChip(topic: article.topic)
+            Spacer()
+            Text(plateNumber)
+                .font(Theme.Typography.meta(10))
+                .tracking(0.6)
+                .foregroundStyle(Theme.Color.stone300)
         }
-        var parts: [String] = []
-        if let h = parsed.headline, !h.isEmpty { parts.append(h) }
-        let firstPara = parsed.body
-            .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
-            .first
-            .map(String.init) ?? ""
-        let cleaned = firstPara.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleaned.isEmpty, !cleaned.hasPrefix("-"), !cleaned.hasPrefix("*") {
-            parts.append(cleaned)
+        .padding(.horizontal, 22)
+        .padding(.top, 20)
+        .padding(.bottom, 10)
+    }
+
+    private var titleBlock: some View {
+        // Tappable title is the optional doorway to the focused detail view.
+        Button(action: onOpen) {
+            Text(article.title ?? "Untitled")
+                .font(Theme.Typography.display(23))
+                .kerning(-0.4)
+                .lineSpacing(1)
+                .foregroundStyle(Theme.Color.ink)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        return parts.joined(separator: " ")
+        .buttonStyle(.plain)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: - Reader (scrollable middle)
+
+    private var readerBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let lead = parsed.headline, !lead.isEmpty {
+                    Text(lead)
+                        .font(Theme.Typography.serif(16, weight: .medium))
+                        .foregroundStyle(Theme.Color.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !readerText.isEmpty {
+                    Text(readerText)
+                        .font(Theme.Typography.body(14.5))
+                        .foregroundStyle(Theme.Color.ink)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let score = parsed.mollickScore {
+                    Text("MOLLICK-LIKENESS · \(score)/20")
+                        .font(Theme.Typography.meta(9, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(Theme.Color.stone300)
+                        .padding(.top, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    /// The in-depth summary body, with sensible fallbacks if parsing yields no
+    /// distinct body (e.g. a one-paragraph summary or the card_teaser window).
+    private var readerText: String {
+        let body = parsed.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty { return body }
+        if let s = article.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            return s
+        }
+        return article.cardTeaser ?? ""
+    }
+
+    // MARK: - Footer (rate · later · share)
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            SparkStars(filled: ratedStars, size: 20) { tapped in
+                let newVal = tapped == ratedStars ? 0 : tapped
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                    ratedStars = newVal
+                }
+                onRate(newVal)
+            }
+
+            Spacer()
+
+            Button(action: onPostpone) {
+                footerLabel("clock.arrow.circlepath", "Later")
+            }
+            .buttonStyle(.plain)
+
+            ShareLink(item: "I'm going to ask you questions about this content: \(article.url)") {
+                footerLabel("square.and.arrow.up", "Share")
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    private func footerLabel(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(text).tracking(0.4)
+        }
+        .font(Theme.Typography.meta(11, weight: .medium))
+        .foregroundStyle(Theme.Color.inkSoft)
     }
 
     private var plateNumber: String {
         String(format: "no. %02d / %02d", index, total)
-    }
-
-    private var metaLine: String {
-        var parts: [String] = [
-            "\(article.kindGlyph) \(article.kindLabel)",
-            article.sourceName ?? article.sourceId,
-        ]
-        if let date = article.publishedAt {
-            parts.append(Self.relativeFormatter.localizedString(for: date, relativeTo: Date()))
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        return f
-    }()
-
-    private var youSaidCallout: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("YOU SAID")
-                .font(Theme.Typography.meta(9, weight: .bold))
-                .tracking(1.2)
-                .foregroundStyle(Theme.Color.accentDark)
-            Text("\"Sharp — worth pairing with the long-context replay paper.\"")
-                .font(Theme.Typography.serif(12.5).italic())
-                .foregroundStyle(Theme.Color.ink)
-            HStack {
-                SparkStars(filled: 5, size: 14)
-                Spacer()
-                Text("saved · 2m ago")
-                    .font(Theme.Typography.meta(9))
-                    .tracking(0.4)
-                    .foregroundStyle(Theme.Color.stone300)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Theme.Color.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Theme.Color.stone200, lineWidth: 1)
-        )
-    }
-}
-
-private struct DeckCardShadow: ViewModifier {
-    let promoted: Bool
-    func body(content: Content) -> some View {
-        if promoted {
-            content
-                .shadow(color: Theme.Color.accent.opacity(0.10), radius: 0)
-                .shadow(color: Color.black.opacity(0.20), radius: 13, y: 6)
-        } else {
-            content
-                .shadow(color: Color.black.opacity(0.20), radius: 13, y: 6)
-        }
     }
 }
 

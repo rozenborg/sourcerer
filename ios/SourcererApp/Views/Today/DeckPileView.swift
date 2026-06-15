@@ -1,26 +1,30 @@
 import SwiftUI
 
-/// The visible card pile — top 3 cards rendered, top card draggable. The
-/// rotations communicate "tactile card pile"; the design says match the
-/// *feel*, not the exact transforms.
+/// The visible card pile — top 3 cards rendered, top card swipeable. The
+/// cards are now self-contained readers (see DeckCard), so the gesture model
+/// splits by axis:
+///   • horizontal pan on the card → ← skip / → save  (handled here)
+///   • vertical pan inside the card → scroll the summary (handled by DeckCard)
+///   • postpone / rate / share → footer controls on the card
 ///
-/// Gesture map (the triage economy):
-///   ← skip · → save · ↑ postpone (reshuffle deeper) · tap read
+/// The horizontal swipe is a `simultaneousGesture` that only reacts when the
+/// pan is horizontally dominant, so it coexists with the inner ScrollView's
+/// vertical scrolling.
 struct DeckPileView: View {
     let articles: [Article]
     /// Total cards in today's deck (for the "no. 04 / NN" plate number).
     let total: Int
 
-    let onSkip: (Article) -> Void       // ← not for me
-    let onSave: (Article) -> Void       // → keep it
-    let onPostpone: (Article) -> Void   // ↑ ask me later (reshuffle deeper)
-    let onOpen: (Article) -> Void       // tap → read
+    let onSkip: (Article) -> Void            // ← not for me
+    let onSave: (Article) -> Void            // → keep it
+    let onPostpone: (Article) -> Void        // footer "Later" (reshuffle deeper)
+    let onOpen: (Article) -> Void            // tap title → focused detail
+    let onRate: (Article, Int) -> Void       // footer stars → quick rate
 
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
 
     private let flickX: CGFloat = 110
-    private let flickY: CGFloat = 110
 
     var body: some View {
         if articles.isEmpty {
@@ -28,10 +32,10 @@ struct DeckPileView: View {
         } else {
             VStack(spacing: 0) {
                 pile
-                Spacer(minLength: 18)
                 gestureHints
                     .padding(.horizontal, 26)
-                    .padding(.bottom, 18)
+                    .padding(.top, 14)
+                    .padding(.bottom, 14)
             }
             .padding(.horizontal, 26)
             .padding(.top, 18)
@@ -50,33 +54,37 @@ struct DeckPileView: View {
                 DeckCard(
                     article: article,
                     index: indexInDeck(article),
-                    total: total
+                    total: total,
+                    onOpen: { onOpen(article) },
+                    onPostpone: { triggerPostpone(article: article) },
+                    onRate: { stars in onRate(article, stars) }
                 )
                 .scaleEffect(scale(forDepth: depth))
                 .rotationEffect(rotation(forDepth: depth, isTop: isTop), anchor: .bottom)
                 .offset(isTop ? dragOffset : offset(forDepth: depth))
                 .opacity(opacity(forDepth: depth))
-                .overlay(swipeIntentOverlay(article: article, isTop: isTop, dragNorm: dragNorm))
+                .overlay(swipeIntentOverlay(isTop: isTop, dragNorm: dragNorm))
                 .zIndex(Double(visible.count - depth))
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if isTop { onOpen(article) }
-                }
-                .gesture(
-                    isTop ?
-                    DragGesture()
-                        .onChanged { v in
-                            dragOffset = v.translation
-                            dragRotation = Double(v.translation.width / 14)
-                        }
-                        .onEnded { v in handleDragEnd(v, article: article) }
-                    : nil
-                )
+                .allowsHitTesting(isTop)
+                .simultaneousGesture(isTop ? horizontalSwipe(article: article) : nil)
                 .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.78), value: dragOffset)
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 480)
+        .frame(height: 520)
+    }
+
+    /// Horizontal-dominant pan only — vertical pans fall through to the card's
+    /// inner ScrollView. `simultaneousGesture` lets both observe the drag; this
+    /// one simply ignores anything that isn't mostly sideways.
+    private func horizontalSwipe(article: Article) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { v in
+                guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                dragOffset = CGSize(width: v.translation.width, height: 0)
+                dragRotation = Double(v.translation.width / 14)
+            }
+            .onEnded { v in handleDragEnd(v, article: article) }
     }
 
     private var emptyDoneState: some View {
@@ -138,26 +146,20 @@ struct DeckPileView: View {
     // MARK: - Swipe intent overlay
 
     @ViewBuilder
-    private func swipeIntentOverlay(article: Article, isTop: Bool, dragNorm: Double) -> some View {
+    private func swipeIntentOverlay(isTop: Bool, dragNorm: Double) -> some View {
         if isTop && dragNorm > 0.08 {
-            let direction = swipeDirection
             ZStack {
-                switch direction {
-                case .left:
+                if dragOffset.width < -20 {
                     intentBadge("SKIP", color: Theme.Color.stone300, side: .leading)
-                case .right:
+                } else if dragOffset.width > 20 {
                     intentBadge("SAVE", color: Theme.Color.sage, side: .trailing)
-                case .up:
-                    intentBadge("LATER", color: Theme.Color.accent, side: .top)
-                case .none:
-                    EmptyView()
                 }
             }
             .opacity(dragNorm)
         }
     }
 
-    private enum SwipeSide { case leading, trailing, top }
+    private enum SwipeSide { case leading, trailing }
 
     @ViewBuilder
     private func intentBadge(_ text: String, color: Color, side: SwipeSide) -> some View {
@@ -178,43 +180,19 @@ struct DeckPileView: View {
         case .trailing:
             label.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                  .padding(20).rotationEffect(.degrees(8))
-        case .top:
-            label.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                 .padding(20)
         }
-    }
-
-    private enum SwipeDirection { case left, right, up, none }
-
-    private var swipeDirection: SwipeDirection {
-        let dx = dragOffset.width
-        let dy = dragOffset.height
-        if abs(dy) > abs(dx), dy < -20 { return .up }
-        if dx < -20 { return .left }
-        if dx > 20  { return .right }
-        return .none
     }
 
     private func handleDragEnd(_ value: DragGesture.Value, article: Article) {
         let dx = value.translation.width
-        let dy = value.translation.height
-
-        // Vertical flick → postpone (reshuffle deeper, no persistence).
-        if dy < -flickY, abs(dy) > abs(dx) {
-            triggerPostpone(article: article)
-            return
-        }
-        // Right flick → save (keep it).
         if dx > flickX {
             triggerSave(article: article)
             return
         }
-        // Left flick → skip.
         if dx < -flickX {
             triggerSkip(article: article)
             return
         }
-        // Snap back
         withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
             dragOffset = .zero
             dragRotation = 0
@@ -223,7 +201,7 @@ struct DeckPileView: View {
 
     private func triggerSkip(article: Article) {
         withAnimation(.easeIn(duration: 0.22)) {
-            dragOffset = CGSize(width: -600, height: dragOffset.height)
+            dragOffset = CGSize(width: -600, height: 0)
             dragRotation = -12
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
@@ -234,7 +212,7 @@ struct DeckPileView: View {
 
     private func triggerSave(article: Article) {
         withAnimation(.easeIn(duration: 0.22)) {
-            dragOffset = CGSize(width: 600, height: dragOffset.height)
+            dragOffset = CGSize(width: 600, height: 0)
             dragRotation = 12
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
@@ -245,7 +223,7 @@ struct DeckPileView: View {
 
     private func triggerPostpone(article: Article) {
         withAnimation(.easeIn(duration: 0.18)) {
-            dragOffset = CGSize(width: dragOffset.width, height: -600)
+            dragOffset = CGSize(width: 0, height: -600)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             onPostpone(article)
@@ -261,41 +239,29 @@ struct DeckPileView: View {
     // MARK: - Gesture hints
 
     private var gestureHints: some View {
-        VStack(spacing: 8) {
+        HStack {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.up")
-                Text("later · reshuffle").tracking(0.6)
+                Image(systemName: "arrow.left")
+                Text("skip").tracking(0.6)
             }
-            .font(Theme.Typography.meta(10, weight: .bold))
-            .foregroundStyle(Theme.Color.accent)
+            .foregroundStyle(Theme.Color.stone300)
 
-            HStack {
-                Label {
-                    Text("skip").tracking(0.6)
-                } icon: {
-                    Image(systemName: "arrow.left")
-                }
-                .font(Theme.Typography.meta(10))
+            Spacer()
+
+            Text("scroll to read · rate, save for later, or share below")
+                .tracking(0.3)
                 .foregroundStyle(Theme.Color.stone300)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
-                Spacer()
+            Spacer()
 
-                HStack(spacing: 6) {
-                    Image(systemName: "hand.tap")
-                    Text("tap to read").tracking(0.6)
-                }
-                .font(Theme.Typography.meta(10))
-                .foregroundStyle(Theme.Color.stone300)
-
-                Spacer()
-
-                HStack(spacing: 6) {
-                    Text("save").tracking(0.6)
-                    Image(systemName: "arrow.right")
-                }
-                .font(Theme.Typography.meta(10))
-                .foregroundStyle(Theme.Color.sage)
+            HStack(spacing: 6) {
+                Text("save").tracking(0.6)
+                Image(systemName: "arrow.right")
             }
+            .foregroundStyle(Theme.Color.sage)
         }
+        .font(Theme.Typography.meta(10))
     }
 }
